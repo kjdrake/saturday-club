@@ -1,0 +1,42 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - league-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  scores:
+    build: .
+    command: ["python", "sync.py"]
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - league-data:/data
+    depends_on:
+      app:
+        condition: service_healthy
+  https:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+volumes:
+  league-data:
+  caddy-data:
+  caddy-config:
