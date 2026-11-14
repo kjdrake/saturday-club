@@ -4,3 +4,8 @@ data
 __pycache__
 tests
 work
+
+.github
+infra
+.openai
+dist/saturday-club-source.zip

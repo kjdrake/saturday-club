@@ -1,0 +1,114 @@
+name: Test and deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Tests and container smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test backend and UI
+        run: |
+          python -m unittest discover -s tests -v
+          node --check dist/app.js
+          node tests/ui.cjs
+          python -m py_compile server.py sync.py ops/backup.py
+          for script in infra/*.sh; do bash -n "$script"; done
+          python -m unittest discover -s infra/tests -v
+      - name: Validate CloudFormation
+        run: |
+          python -m pip install -r infra/requirements-checks.txt
+          cfn-lint infra/stack.yaml
+      - name: Build the image that will be deployed
+        run: docker build --tag saturday-club:${{ github.sha }} .
+      - name: Exercise real container login and persistence
+        run: python infra/smoke.py saturday-club:${{ github.sha }}
+      - name: Save tested image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
+        run: docker save saturday-club:${{ github.sha }} | gzip > /tmp/saturday-club-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
+        with:
+          name: tested-image
+          path: /tmp/saturday-club-image.tar.gz
+          retention-days: 1
+      - name: Explain AWS bootstrap status
+        if: vars.AWS_ROLE_ARN == ''
+        run: echo 'CI passed. Production deployment is disabled until the AWS setup variables are configured.' >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy production
+    needs: verify
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: saturday-club-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      DEPLOY_DOCUMENT: ${{ vars.DEPLOY_DOCUMENT }}
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require current main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          test "$current" = "$GITHUB_SHA" || { echo 'A newer commit is on main; deploy that run instead.'; exit 1; }
+      - name: Require complete configuration
+        run: |
+          for key in AWS_REGION ECR_REPOSITORY INSTANCE_ID DEPLOY_DOCUMENT APP_URL; do
+            test -n "${!key}" || { echo "Missing repository variable: $key"; exit 1; }
+          done
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: saturday-club-${{ github.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-image
+          path: /tmp/image
+      - name: Publish exact tested image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          registry="${ECR_REPOSITORY%%/*}"
+          repository_name="${ECR_REPOSITORY#*/}"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          if aws ecr describe-images --repository-name "$repository_name" --image-ids "imageTag=$IMAGE_TAG" >/dev/null 2>&1; then
+            echo 'This immutable commit image already exists; reusing it.'
+          else
+            docker load --input /tmp/image/saturday-club-image.tar.gz
+            docker tag "saturday-club:$IMAGE_TAG" "$ECR_REPOSITORY:$IMAGE_TAG"
+            docker push "$ECR_REPOSITORY:$IMAGE_TAG"
+          fi
+      - name: Deploy through restricted SSM document
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: python infra/deploy_ssm.py
+      - name: Production URL
+        run: echo "Production health check passed. [$APP_URL]($APP_URL)" >> "$GITHUB_STEP_SUMMARY"
