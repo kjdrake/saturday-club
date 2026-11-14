@@ -23,7 +23,11 @@ python server.py
 
 Open http://localhost:8000. In another terminal run `python sync.py` for background updates. Set the same DATABASE_PATH if overriding it. For production use Gunicorn via Docker; wsgiref is only a development server. ADMIN_PASSWORD bootstraps the first account only. Remove the bootstrap environment values after creating the admin. Keep the password in a password manager. Password reset currently requires a server operator to update the stored password hash; there is no email reset flow.
 
-## Deploy on AWS (single-instance Lightsail or EC2)
+## Automatic AWS deployments with GitHub Actions
+
+For the recommended EC2 + ECR + GitHub OIDC pipeline, follow [the one-time AWS setup guide](infra/README.md). Pull requests run tests; passing changes merged into `main` deploy automatically after AWS setup. It includes a CloudFormation stack, persistent encrypted storage, HTTPS, scheduled S3 backups, and health-check rollback. No AWS resources are provisioned just by committing the workflow.
+
+## Manual deployment on Lightsail or EC2 (alternative)
 
 1. Create an Ubuntu instance with at least 1 GB RAM; attach a static IP. Allow inbound TCP 80 and 443 and restrict SSH to your IP. Do not expose 8000. Install Docker Engine and the Compose plugin using Docker's official Ubuntu instructions.
 2. Point a domain's A record at the static IP. Copy this source to the instance.
