@@ -49,8 +49,8 @@ Encrypt and store backups outside the instance. Test a restore before relying on
 - The Odds API: optional server-side ODDS_API_KEY; US college-football spreads from public bookmakers. An API subscription/quota may be required. Current provider team names must match ESPN names; unmatched games use ESPN odds or a manually entered line.
 - The background worker polls selected weeks every 30 seconds near game day. The browser refreshes data every 30 seconds when there are no unsaved picks. Feed failures retain the last known results and update time. No simulated live updates are used in shared mode. Admin sync is rate-limited to once per 25 seconds per week.
 - Lines freeze when a game is first included. They cannot change while selected, and picks lock on the server at kickoff. A game with picks cannot be removed. If no spread is available, the commissioner must enter a line before selecting it.
-- Cover: 1 point. Push: 0.5. Miss or no pick: 0. Final games are graded dynamically, so score corrections update standings. Canceled/postponed games are void (0 points). Ties share a rank. Missed picks earn 0 but are not recorded as losses in W–L–P.
-- Seasons are retained independently. The UI includes selectors for 2024–2026; add future years to the season select/archive list in `dist/index.html` and `dist/app.js`. The API supports 2000–2100. Postseason and multiple independent friend groups are not included.
+- Cover: 1 point. Push: 0.5. Miss or no pick: 0. Final games are graded dynamically, so score corrections update standings. Canceled/postponed games are void (0 points). Commissioners can use Set result to grade a manually added game or correct a result. Feed-backed games may be overwritten by a subsequent sync. Ties share a rank. Missed picks earn 0 but are not recorded as losses in W–L–P.
+- Seasons are retained independently. The UI initially lists 2024–2026. Use Commissioner tools → Season & week → Open season to manage any new season from 2000–2100. Seasons with saved games appear automatically in the season selector and archive. Postseason and multiple independent friend groups are not included.
 
 ## Security and operation
 

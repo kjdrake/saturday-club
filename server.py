@@ -159,7 +159,7 @@ def application(environ,start_response):
                 if route=='health':result={'ok':True}
                 elif route=='state' and method=='GET':
                     season,week=period(data);last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
-                    result={'user':{k:user[k] for k in ('id','name','role')},'games':game_rows(c,season,week),'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':standings(c,season),'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    result={'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':game_rows(c,season,week),'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':standings(c,season),'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
                 elif route=='picks' and method=='POST':
                     season,week=period(data);submitted=data.get('picks',{})
                     if not isinstance(submitted,dict):raise Problem('Invalid picks')
@@ -184,6 +184,13 @@ def application(environ,start_response):
                         c.execute('UPDATE users SET active=? WHERE id=?',(int(bool(data['active'])),data['id']));c.execute('DELETE FROM sessions WHERE user_id=?',(data['id'],));result={'ok':True}
                     elif route=='admin/sync':
                         season,week=period(data);result={'message':sync_feed(season,week)}
+                    elif route=='admin/result':
+                        season,week=period(data);g=next((g for g in game_rows(c,season,week) if g['id']==data.get('id')),None)
+                        if not g:raise Problem('Unknown game',404)
+                        if data.get('status') not in ('final','void'):raise Problem('Invalid result status')
+                        if any(not isinstance(data.get(k),int) or not 0<=data[k]<=200 for k in ('homeScore','awayScore')):raise Problem('Scores must be integers from 0 to 200')
+                        if kickoff(g)>time.time() and data['status']=='final':raise Problem('Cannot finalize a game before kickoff')
+                        g.update(status=data['status'],homeScore=data['homeScore'],awayScore=data['awayScore']);put_game(c,g,season,week);result={'ok':True}
                     elif route=='admin/game':
                         season,week=period(data);g=data['game'];validate_game(g);g.update(id=secrets.token_hex(12),included=False,status='scheduled');put_game(c,g,season,week);result={'ok':True}
                     elif route=='admin/slate':
