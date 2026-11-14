@@ -29,6 +29,7 @@ jobs:
           python -m unittest discover -s tests -v
           node --check dist/app.js
           node tests/ui.cjs
+          node tests/auth-ui.cjs
           python -m py_compile server.py sync.py ops/backup.py
           for script in infra/*.sh; do bash -n "$script"; done
           python -m unittest discover -s infra/tests -v
