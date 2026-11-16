@@ -1,21 +1,23 @@
 // Run the real sign-in submit handler against controlled API responses.
 const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
-function harness(){
+function harness(providers=[]){
   const elements=new Map(),calls=[];
   const el=selector=>{
     if(!elements.has(selector))elements.set(selector,{
       innerHTML:'',textContent:'',style:{},value:'2026 season',hidden:true,disabled:false,
       addEventListener(type,handler){this[type]=handler},setAttribute(key,value){this[key]=value},removeAttribute(key){delete this[key]},
+      querySelectorAll(selector){if(selector==='[data-social]'||selector==='button')return this.innerHTML.includes('data-social')?providers.map(p=>el('#social-'+p.id)):[];return []},
       showModal(){this.open=true},close(){this.open=false},focus(){this.focused=true}
     });
     return elements.get(selector);
   };
+  for(const p of providers)el('#social-'+p.id).dataset={social:p.id};
   const form=el('#loginForm');form.elements={email:{value:' admin@example.com '},password:{value:'test-password-123'},code:{value:'',addEventListener(){}}};
   let handler=async()=>({ok:false,status:401,json:async()=>({error:'Sign in required'})});
-  const context={document:{querySelector:el,querySelectorAll:()=>[]},localStorage:{getItem:()=>null},location:{hash:''},window:{},AbortController,
+  const context={document:{querySelector:el,querySelectorAll:()=>[]},localStorage:{getItem:()=>null},location:{hash:''},window:{location:{assign(url){calls.push({redirect:url})}}},AbortController,
     FormData:class {constructor(form){this.form=form}*[Symbol.iterator](){for(const[key,input]of Object.entries(this.form.elements))yield[key,input.value]}},
     setTimeout:()=>1,clearTimeout(){},setInterval(){},URL,Blob,crypto:require('node:crypto').webcrypto,
-    fetch:async(url,options)=>{calls.push({url,options});return handler(url,options)},console};
+    fetch:async(url,options)=>{if(url==='/api/auth/providers')return response(200,{providers});calls.push({url,options});return handler(url,options)},console};
   vm.createContext(context);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),context);
   return {el,form,calls,run:code=>vm.runInContext(code,context),setHandler:next=>handler=next};
 }
@@ -55,6 +57,19 @@ const submit=h=>h.form.submit({preventDefault(){}});
   {
     const h=await ready();h.form.elements.code.value=' invite-code ';h.setHandler(async url=>url==='/api/register'?response(200,{ok:true}):response(200,state));await submit(h);
     assert.equal(h.calls[0].url,'/api/register');assert.equal(JSON.parse(h.calls[0].options.body).code,'invite-code');assert.equal(h.el('#modal').open,false);
+  }
+  {
+    const h=harness([{id:'google',name:'Google',connected:false},{id:'facebook',name:'Facebook',connected:false}]);
+    await new Promise(setImmediate);h.run('demo=false;user=null;accountModal()');await new Promise(setImmediate);
+    h.calls.length=0;h.form.elements.code.value='single-use-invite';
+    h.setHandler(async()=>response(200,{url:'https://accounts.google.com/test'}));
+    await h.el('#social-google').click();
+    assert.equal(h.calls[0].url,'/api/auth/start');
+    assert.deepEqual(JSON.parse(h.calls[0].options.body),{provider:'google',code:'single-use-invite'});
+    assert.equal(h.calls[1].redirect,'https://accounts.google.com/test');
+    h.setHandler(async()=>response(403,{error:'Invalid or expired invitation'}));
+    await h.el('#social-facebook').click();
+    assert.equal(h.el('#socialError').hidden,false);assert.match(h.el('#socialError').textContent,/expired invitation/);
   }
   console.log('Sign-in regression checks passed: visible errors, pending state, duplicate prevention, success, cookie failure, network failure, timeout, invalid response, and registration.');
 })().catch(error=>{console.error(error);process.exitCode=1});

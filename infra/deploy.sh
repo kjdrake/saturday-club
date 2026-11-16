@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 source /opt/saturday-club/config.env
+export AWS_REGION
 export AWS_DEFAULT_REGION="$AWS_REGION"
 export DOMAIN
 sha=${1:?Pass the Git commit SHA to deploy}
@@ -27,7 +28,7 @@ aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --query SecretStri
 import json, pathlib, re, sys
 secret=json.load(sys.stdin)
 lines=[]
-for key in ("ADMIN_EMAIL", "ADMIN_NAME", "ADMIN_PASSWORD", "ODDS_API_KEY"):
+for key in ("ADMIN_EMAIL", "ADMIN_NAME", "ADMIN_PASSWORD", "ODDS_API_KEY", "APP_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "FACEBOOK_CLIENT_ID", "FACEBOOK_CLIENT_SECRET", "SES_FROM_EMAIL"):
     value=secret.get(key, "")
     if not isinstance(value,str) or "\n" in value or "\r" in value:
         raise ValueError("Invalid runtime secret value")

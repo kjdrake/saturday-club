@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 -m club && mkdir /data && chown club /data
-COPY --chown=club:club server.py sync.py ./
+COPY --chown=club:club server.py social_auth.py invitations.py sync.py ./
 COPY --chown=club:club dist ./dist
 COPY --chown=club:club ops ./ops
 USER club

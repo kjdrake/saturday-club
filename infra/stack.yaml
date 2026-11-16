@@ -164,6 +164,12 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource: !Ref RuntimeSecret
               - Effect: Allow
+                Action: ses:SendEmail
+                Resource: !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${DomainName}'
+                Condition:
+                  StringLike:
+                    ses:FromAddress: !Sub '*@${DomainName}'
+              - Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub '${Backups.Arn}/database/*'
   InstanceProfile:
@@ -189,7 +195,7 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds: [!Ref Firewall]
-      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled, HttpPutResponseHopLimit: 2}
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs: {Encrypted: true, VolumeSize: 20, VolumeType: gp3, DeleteOnTermination: true}

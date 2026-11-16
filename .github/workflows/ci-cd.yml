@@ -26,6 +26,7 @@ jobs:
           node-version: '22'
       - name: Test backend and UI
         run: |
+          python -m pip install -r requirements.txt
           python -m unittest discover -s tests -v
           node --check dist/app.js
           node tests/ui.cjs
@@ -33,7 +34,7 @@ jobs:
           node tests/slate-ui.cjs
           node tests/live-ui.cjs
           node tests/game-cards-ui.cjs
-          python -m py_compile server.py sync.py ops/backup.py
+          python -m py_compile server.py social_auth.py invitations.py sync.py ops/backup.py infra/account_services.py
           for script in infra/*.sh; do bash -n "$script"; done
           python -m unittest discover -s infra/tests -v
       - name: Validate CloudFormation

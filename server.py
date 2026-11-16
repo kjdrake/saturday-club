@@ -2,6 +2,8 @@
 import os, json, sqlite3, hashlib, secrets, hmac, time, datetime, urllib.request, urllib.parse, threading, math
 from pathlib import Path
 from http.cookies import SimpleCookie
+import social_auth
+import invitations
 BASE=Path(__file__).parent
 SCORE_REFRESH_SECONDS=15
 DB=os.getenv('DATABASE_PATH',str(BASE/'data'/'club.db'))
@@ -24,7 +26,7 @@ def pw_hash(password,salt=None):
 def verify(password,hashed):return hmac.compare_digest(pw_hash(password,hashed.split(':')[0]),hashed)
 def initialize():
     with db() as c:
-        c.executescript(SCHEMA)
+        c.executescript(SCHEMA + social_auth.SCHEMA)
         email=os.getenv('ADMIN_EMAIL');password=os.getenv('ADMIN_PASSWORD')
         if not c.execute('SELECT 1 FROM users LIMIT 1').fetchone() and email and password:
             if len(password)<12:raise ValueError('ADMIN_PASSWORD must be at least 12 characters')
@@ -194,8 +196,14 @@ def limit(ip):
         if len(ts)>=20:raise Problem('Too many attempts. Try again in 15 minutes.',429)
         ts.append(time.time());_attempts[ip]=ts
 
+def session_cookie(c, uid, headers):
+    token=secrets.token_urlsafe(32)
+    c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
+    c.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),uid,time.time()+604800))
+    headers.append(('Set-Cookie',f'sc_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800'+('; Secure' if SECURE else '')))
+
 def application(environ,start_response):
-    headers=[('X-Content-Type-Options','nosniff'),('Referrer-Policy','same-origin'),('X-Frame-Options','DENY')]
+    headers=[('X-Content-Type-Options','nosniff'),('Referrer-Policy','no-referrer'),('X-Frame-Options','DENY')]
     try:
         path=environ.get('PATH_INFO','/');method=environ['REQUEST_METHOD']
         if not path.startswith('/api/'):
@@ -223,10 +231,28 @@ def application(environ,start_response):
             cookie=SimpleCookie();cookie.load(environ.get('HTTP_COOKIE',''));token=cookie['sc_session'].value if 'sc_session' in cookie else ''
             u=c.execute('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token=? AND s.expires>? AND u.active=1',(hashlib.sha256(token.encode()).hexdigest(),time.time())).fetchone()
             user=dict(u) if u else None
-            if route in ('login','register') and method=='POST':
+            if route=='auth/providers' and method=='GET':
+                result={'providers':[{'id':p,'name':name,'connected':bool(user and c.execute('SELECT 1 FROM social_identities WHERE provider=? AND user_id=?',(p,user['id'])).fetchone())} for p,name in social_auth.LABELS.items() if social_auth.config(p)]}
+            elif route=='auth/start' and method=='POST':
+                limit(environ.get('REMOTE_ADDR','unknown'))
+                try:url,browser=social_auth.start(c,str(data.get('provider','')),str(data.get('code','')).strip(),user)
+                except social_auth.SocialError as e:raise Problem(str(e),403)
+                headers.append(('Set-Cookie',f'sc_oauth={browser}; Path=/api/oauth/; HttpOnly; SameSite=Lax; Max-Age=600'+('; Secure' if SECURE else '')))
+                result={'url':url}
+            elif route.startswith('oauth/') and route.endswith('/callback') and method=='GET':
+                provider=route.split('/')[1];browser=cookie['sc_oauth'].value if 'sc_oauth' in cookie else ''
+                try:
+                    uid=social_auth.complete(c,provider,data,browser,user,pw_hash)
+                    session_cookie(c,uid,headers);target='/?auth_success=1'
+                except social_auth.SocialError as e:
+                    c.rollback();target='/?auth_error='+e.code
+                headers.append(('Set-Cookie','sc_oauth=; Path=/api/oauth/; HttpOnly; SameSite=Lax; Max-Age=0'+('; Secure' if SECURE else '')))
+                start_response('303 See Other',headers+[('Location',target)]);return [b'']
+            elif route in ('login','register') and method=='POST':
                 limit(environ.get('REMOTE_ADDR','unknown'));email=str(data.get('email','')).lower().strip();password=str(data.get('password',''))
                 if len(password)<10 or len(password)>256 or '@' not in email or len(email)>254:raise Problem('Enter a valid email and a password of at least 10 characters.')
                 if route=='register':
+                    c.execute('BEGIN IMMEDIATE')
                     code=hashlib.sha256(str(data.get('code','')).encode()).hexdigest();invite=c.execute('SELECT * FROM invites WHERE code=? AND expires>?',(code,time.time())).fetchone()
                     if not invite:raise Problem('Invalid or expired invite code',403)
                     uid=secrets.token_hex(12)
@@ -237,8 +263,7 @@ def application(environ,start_response):
                     row=c.execute('SELECT * FROM users WHERE email=? AND active=1',(email,)).fetchone()
                     if not row or not verify(password,row['password']):raise Problem('Incorrect email or password',401)
                     user=dict(row)
-                token=secrets.token_urlsafe(32);c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),));c.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),user['id'],time.time()+604800))
-                headers.append(('Set-Cookie',f'sc_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800'+('; Secure' if SECURE else '')));result={'ok':True}
+                session_cookie(c,user['id'],headers);result={'ok':True}
             elif route=='logout' and method=='POST':
                 c.execute('DELETE FROM sessions WHERE token=?',(hashlib.sha256(token.encode()).hexdigest(),));headers.append(('Set-Cookie','sc_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'));result={'ok':True}
             else:
@@ -275,7 +300,24 @@ def application(environ,start_response):
                     if route=='admin/invite':
                         name=str(data.get('name','')).strip()[:80]
                         if not name:raise Problem('Name required')
-                        code=secrets.token_urlsafe(18);c.execute('INSERT INTO invites VALUES(?,?,?)',(hashlib.sha256(code.encode()).hexdigest(),name,time.time()+604800));result={'code':code}
+                        delivery=data.get('delivery','link');email=str(data.get('email','')).strip()
+                        if delivery not in ('link','email'):raise Problem('Choose a link or email invitation.')
+                        if delivery=='email':
+                            if not invitations.valid_email(email):raise Problem('Enter one valid recipient email address.')
+                            if not invitations.ready():raise Problem('Email sending is not configured yet. Create a link and share it by text, or ask the site operator to finish SES setup.',503)
+                            limit('invite-'+user['id'])
+                        code=secrets.token_urlsafe(18);hashed=hashlib.sha256(code.encode()).hexdigest()
+                        c.execute('INSERT INTO invites VALUES(?,?,?)',(hashed,name,time.time()+604800))
+                        result={'code':code,'delivery':'link'}
+                        if delivery=='email':
+                            c.commit() # A recipient must never receive a link before its invite is committed.
+                            link=invitations.public_url()+'/?'+urllib.parse.urlencode({'invite':code})
+                            try:invitations.send_email(email,name,link)
+                            except Exception:
+                                # Provider errors can contain recipients/credentials; do not log their body.
+                                c.execute('DELETE FROM invites WHERE code=?',(hashed,));c.commit()
+                                raise Problem('The email service did not confirm sending. This invitation was canceled. Check SES setup or create a link to share yourself.',502) from None
+                            result.update(delivery='email',message='Invitation accepted by the email service. Check the recipient inbox or spam folder.')
                     elif route=='admin/member':
                         if data['id']==user['id']:raise Problem('You cannot disable your own account')
                         c.execute('UPDATE users SET active=? WHERE id=?',(int(bool(data['active'])),data['id']));c.execute('DELETE FROM sessions WHERE user_id=?',(data['id'],));result={'ok':True}
