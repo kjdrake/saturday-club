@@ -38,6 +38,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'g1','included':False}]})[0],409)
         self.game(offset=-5)
         self.assertEqual(self.call('picks',{'season':2026,'week':12,'picks':{'g1':'away'}})[0],409)
+        self.assertEqual(self.call('picks',{'season':2026,'week':12,'picks':{}})[0],409)
         self.assertEqual(self.call('state')[1]['picks']['g1'],'home')
     def test_grading_and_season_isolation(self):
         self.login();self.game();self.call('picks',{'season':2026,'week':12,'picks':{'g1':'home'}});g=self.game(status='final')
@@ -52,9 +53,46 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.call('state')[0],401)
     def test_sync_keeps_frozen_spread_and_updates_scores(self):
         self.game(id='100')
-        team=lambda side,id,name: {'homeAway':side,'score':'28' if side=='home' else '24','team':{'id':id,'displayName':name,'abbreviation':name},'records':[]}
+        team=lambda side,id,name: {'homeAway':side,'score':'28' if side=='home' else '24','team':{'id':id,'displayName':name,'abbreviation':name,'conferenceId':'8'},'records':[]}
         feed={'events':[{'id':'100','date':'2026-11-14T20:30Z','status':{'type':{'completed':True,'state':'post'}},'competitions':[{'competitors':[team('home','1','Home'),team('away','2','Away')],'odds':[{'spread':9,'details':'Home -9','provider':{'name':'Test book'}}]}]}]}
         with patch.object(server,'fetch_json',return_value=feed),patch.dict(os.environ,{'ODDS_API_KEY':''}):server.sync_feed(2026,12)
         with server.db() as c:g=server.game_rows(c,2026,12)[0]
-        self.assertEqual(g['spread'],-3.5);self.assertEqual(g['status'],'final');self.assertEqual(g['homeScore'],28)
+        self.assertEqual(g['spread'],-3.5);self.assertEqual(g['status'],'final');self.assertEqual(g['homeScore'],28);self.assertEqual(g['homeConference'],'SEC');self.assertEqual(g['awayConferenceId'],'8')
+    def test_commissioner_publishes_subset_and_member_can_skip_or_clear(self):
+        self.login();admin_cookie=self.cookie
+        for id in ['g1','g2','g3']:
+            game=self.game(id=id);game['included']=False
+            with server.db() as c:server.put_game(c,game,2026,12)
+        self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'g1','included':True,'spread':-3.5},{'id':'g2','included':True,'spread':-3.5}]})[0],200)
+        code=self.call('admin/invite',{'name':'Selective Friend'})[1]['code']
+        self.assertEqual(self.call('register',{'email':'selective@example.com','password':'selective-password-123','code':code})[0],200)
+        self.assertEqual({g['id'] for g in self.call('state')[1]['games']},{'g1','g2'})
+        self.assertEqual(self.call('picks',{'season':2026,'week':12,'picks':{'g1':'away'}})[0],200)
+        self.assertEqual(self.call('state')[1]['picks'],{'g1':'away'})
+        admin_games=self.call('state',cookie=admin_cookie)[1]['games']
+        self.assertTrue(next(g for g in admin_games if g['id']=='g1')['hasPicks'])
+        self.assertEqual(self.call('picks',{'season':2026,'week':12,'picks':{}})[0],200)
+        self.assertEqual(self.call('state')[1]['picks'],{})
+        self.assertEqual(self.call('picks',{'season':2026,'week':12,'picks':{'g3':'home'}})[0],409)
+    def test_publishing_preserves_hidden_games_and_protected_picks_atomically(self):
+        self.login();self.game(id='protected');self.game(id='hidden')
+        other=self.game(id='other');other['included']=False
+        with server.db() as c:server.put_game(c,other,2026,12)
+        self.call('picks',{'season':2026,'week':12,'picks':{'protected':'home'}})
+        status,_=self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'other','included':True,'spread':-3.5},{'id':'protected','included':False,'spread':-3.5}]})
+        self.assertEqual(status,409)
+        games={g['id']:g for g in self.call('state')[1]['games']}
+        self.assertFalse(games['other']['included']);self.assertTrue(games['protected']['included']);self.assertTrue(games['hidden']['included'])
+        self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'other','included':True,'spread':-3.5}]})[0],200)
+        games={g['id']:g for g in self.call('state')[1]['games']}
+        self.assertTrue(all(g['included'] for g in games.values()))
+    def test_started_games_and_missing_lines_cannot_be_added(self):
+        self.login();past=self.game(id='past',offset=-5);past['included']=False
+        missing=self.game(id='missing');missing.update(included=False,spread=None)
+        with server.db() as c:server.put_game(c,past,2026,12);server.put_game(c,missing,2026,12)
+        self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'past','included':True,'spread':-3.5}]})[0],409)
+        self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'missing','included':True,'spread':None}]})[0],400)
+        self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'missing','included':True,'spread':float('nan')}]})[0],400)
+        self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'missing','included':True,'spread':7.5}]})[0],200)
+
 if __name__=='__main__':unittest.main()

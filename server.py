@@ -1,9 +1,10 @@
 """Saturday Club: portable WSGI application, SQLite persistence, public feed adapters."""
-import os, json, sqlite3, hashlib, secrets, hmac, time, datetime, urllib.request, urllib.parse, threading
+import os, json, sqlite3, hashlib, secrets, hmac, time, datetime, urllib.request, urllib.parse, threading, math
 from pathlib import Path
 from http.cookies import SimpleCookie
 BASE=Path(__file__).parent
 DB=os.getenv('DATABASE_PATH',str(BASE/'data'/'club.db'))
+CONFERENCES={'1': 'ACC', '4': 'Big 12', '5': 'Big Ten', '8': 'SEC', '9': 'Pac-12', '12': 'Conference USA', '15': 'MAC', '17': 'Mountain West', '18': 'FBS Independents', '37': 'Sun Belt', '151': 'American'}
 SECURE=os.getenv('COOKIE_SECURE','true').lower()=='true'
 SCHEMA='''
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT NOT NULL,email TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT NOT NULL,active INTEGER DEFAULT 1);
@@ -74,7 +75,7 @@ def sync_feed(season,week):
                 line=abs(float(line));line=-line if detail.startswith(teams['home']['team'].get('abbreviation','!')) else line
             g={'id':e['id'],'kickoff':e['date'],'status':status,'period':e['status'].get('type',{}).get('shortDetail',''),'included':False,'spread':line,'bookmaker':odd.get('provider',{}).get('name','ESPN public odds'),'network':', '.join(n for b in comp.get('broadcasts',[]) for n in b.get('names',[]))}
             for side,t in teams.items():
-                g[side]=t['team']['displayName'];g[side+'Abbr']=t['team']['abbreviation'];g[side+'Id']=t['team']['id'];g[side+'Score']=int(t.get('score',0));g[side+'Rank']=t.get('curatedRank',{}).get('current');g[side+'Record']=next((r.get('summary','') for r in t.get('records',[]) if r.get('type')=='total'),'')
+                g[side+'ConferenceId']=str(t['team'].get('conferenceId',''));g[side+'Conference']=CONFERENCES.get(g[side+'ConferenceId'],'Other / unknown');g[side]=t['team']['displayName'];g[side+'Abbr']=t['team']['abbreviation'];g[side+'Id']=t['team']['id'];g[side+'Score']=int(t.get('score',0));g[side+'Rank']=t.get('curatedRank',{}).get('current');g[side+'Record']=next((r.get('summary','') for r in t.get('records',[]) if r.get('type')=='total'),'')
                 if g[side+'Rank'] and g[side+'Rank']>25:g[side+'Rank']=None
             parsed.append(g)
         warning=''
@@ -89,6 +90,7 @@ def sync_feed(season,week):
                                 if outcome:g['spread']=outcome['point'];g['bookmaker']=b['title'];break
             except Exception:warning=' Additional odds provider unavailable; ESPN odds retained.'
         with db() as c:
+            c.execute('BEGIN IMMEDIATE')
             old={g['id']:g for g in game_rows(c,season,week)}
             for g in parsed:
                 if g['id'] in old:
@@ -158,12 +160,20 @@ def application(environ,start_response):
                 if route!='health' and not user:raise Problem('Sign in required',401)
                 if route=='health':result={'ok':True}
                 elif route=='state' and method=='GET':
-                    season,week=period(data);last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
-                    result={'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':game_rows(c,season,week),'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':standings(c,season),'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    season,week=period(data);state_games=game_rows(c,season,week)
+                    if user['role']=='admin':
+                        picked={row[0] for row in c.execute('SELECT DISTINCT game_id FROM picks WHERE season=? AND week=?',(season,week))}
+                        state_games=[{**g,'hasPicks':g['id'] in picked} for g in state_games]
+                    else:state_games=[g for g in state_games if g.get('included')]
+                    last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
+                    result={'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':standings(c,season),'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
                 elif route=='picks' and method=='POST':
                     season,week=period(data);submitted=data.get('picks',{})
                     if not isinstance(submitted,dict):raise Problem('Invalid picks')
-                    for g in game_rows(c,season,week):
+                    c.execute('BEGIN IMMEDIATE')
+                    available=game_rows(c,season,week)
+                    if set(submitted)-{g['id'] for g in available if g.get('included')}:raise Problem('The weekly slate has changed. Refresh before saving your picks.',409)
+                    for g in available:
                         if not g.get('included') or g.get('spread') is None:continue
                         side=submitted.get(g['id'])
                         previous=c.execute('SELECT side FROM picks WHERE user_id=? AND game_id=? AND season=? AND week=?',(user['id'],g['id'],season,week)).fetchone()
@@ -171,7 +181,8 @@ def application(environ,start_response):
                             if side!=(previous['side'] if previous else None):raise Problem('A game has locked. Refresh your pick sheet.',409)
                             continue
                         if side in ('home','away'):c.execute('INSERT OR REPLACE INTO picks VALUES(?,?,?,?,?)',(user['id'],g['id'],season,week,side))
-                        elif side is not None:raise Problem('Invalid pick side')
+                        elif side is None:c.execute('DELETE FROM picks WHERE user_id=? AND game_id=? AND season=? AND week=?',(user['id'],g['id'],season,week))
+                        else:raise Problem('Invalid pick side')
                     result={'ok':True}
                 elif route.startswith('admin/') and method=='POST':
                     if user['role']!='admin':raise Problem('Admin access required',403)
@@ -194,14 +205,16 @@ def application(environ,start_response):
                     elif route=='admin/game':
                         season,week=period(data);g=data['game'];validate_game(g);g.update(id=secrets.token_hex(12),included=False,status='scheduled');put_game(c,g,season,week);result={'ok':True}
                     elif route=='admin/slate':
-                        season,week=period(data);old={g['id']:g for g in game_rows(c,season,week)}
+                        season,week=period(data);c.execute('BEGIN IMMEDIATE');old={g['id']:g for g in game_rows(c,season,week)}
                         for item in data.get('games',[]):
                             g=old.get(item['id'])
                             if not g:raise Problem('Unknown game')
-                            if locked(g):continue
+                            if locked(g):
+                                if bool(item.get('included'))!=bool(g.get('included')):raise Problem('A game has started and its slate selection is locked. Refresh the slate.',409)
+                                continue
                             if not g.get('included'):
                                 g['spread']=item.get('spread')
-                                if g['spread'] is not None and (not isinstance(g['spread'],(float,int)) or abs(g['spread'])>100):raise Problem('Invalid spread')
+                                if g['spread'] is not None and (isinstance(g['spread'],bool) or not isinstance(g['spread'],(float,int)) or not math.isfinite(g['spread']) or abs(g['spread'])>100):raise Problem('Invalid spread')
                             if item.get('included') and g.get('spread') is None:raise Problem('Select a spread before including a game')
                             if not item.get('included') and g.get('included') and c.execute('SELECT 1 FROM picks WHERE game_id=? AND season=? AND week=?',(g['id'],season,week)).fetchone():raise Problem('Cannot remove a game after members have picked it',409)
                             g['included']=bool(item.get('included'));put_game(c,g,season,week)
