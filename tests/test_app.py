@@ -95,4 +95,57 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'missing','included':True,'spread':float('nan')}]})[0],400)
         self.assertEqual(self.call('admin/slate',{'season':2026,'week':12,'games':[{'id':'missing','included':True,'spread':7.5}]})[0],200)
 
+    def live_fixture(self):
+        with server.db() as c:
+            for uid,name in [('alice','Alice'),('bob','Bob'),('carol','Carol')]:
+                c.execute('INSERT INTO users VALUES(?,?,?,?,?,1)',(uid,name,uid+'@example.com',server.pw_hash('test-password-123'),'member'))
+            live={'id':'live','home':'Home','away':'Away','spread':-3.5,'included':True,'status':'live','kickoff':datetime.datetime.fromtimestamp(time.time()-3600,datetime.timezone.utc).isoformat(),'homeScore':24,'awayScore':20}
+            server.put_game(c,live,2026,12)
+            c.execute('INSERT INTO picks VALUES(?,?,?,?,?)',('alice','live',2026,12,'home'))
+            c.execute('INSERT INTO picks VALUES(?,?,?,?,?)',('bob','live',2026,12,'away'))
+            c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('last-2026-12',server.now_iso()))
+        return live
+    def test_live_projection_flips_ranks_without_changing_official_points_or_picks(self):
+        self.login();live=self.live_fixture()
+        state=self.call('state')[1];board=state['liveStandings'];rows={r['id']:r for r in board['rows']}
+        self.assertEqual(rows['alice']['projectedPoints'],1);self.assertEqual(rows['bob']['projectedPoints'],0)
+        self.assertEqual(rows['alice']['rank'],1);self.assertEqual(rows['bob']['rank'],2)
+        self.assertEqual(rows['alice']['points'],0);self.assertTrue(all(r['points']==0 for r in state['standings']))
+        self.assertEqual(board['activeGames'],1);self.assertFalse(board['stale'])
+        live['awayScore']=27
+        with server.db() as c:server.put_game(c,live,2026,12)
+        state=self.call('state')[1];rows={r['id']:r for r in state['liveStandings']['rows']}
+        self.assertEqual(rows['bob']['rank'],1);self.assertEqual(rows['bob']['livePoints'],1)
+        self.assertEqual(rows['alice']['livePoints'],0)
+        with server.db() as c:self.assertEqual(c.execute('SELECT side FROM picks WHERE user_id=?',('alice',)).fetchone()[0],'home')
+    def test_live_push_finalization_and_void_do_not_double_count(self):
+        self.login();live=self.live_fixture();live['spread']=-4
+        with server.db() as c:server.put_game(c,live,2026,12)
+        rows={r['id']:r for r in self.call('state')[1]['liveStandings']['rows']}
+        self.assertEqual(rows['alice']['livePoints'],.5);self.assertEqual(rows['bob']['livePoints'],.5)
+        self.assertEqual(rows['alice']['livePushes'],1);self.assertEqual(rows['alice']['rank'],rows['bob']['rank'])
+        live['status']='final'
+        with server.db() as c:server.put_game(c,live,2026,12)
+        state=self.call('state')[1];rows={r['id']:r for r in state['liveStandings']['rows']}
+        self.assertEqual(rows['alice']['points'],.5);self.assertEqual(rows['alice']['livePoints'],0);self.assertEqual(rows['alice']['projectedPoints'],.5)
+        self.assertEqual(state['liveStandings']['activeGames'],0)
+        live['status']='void'
+        with server.db() as c:server.put_game(c,live,2026,12)
+        row=next(r for r in self.call('state')[1]['liveStandings']['rows'] if r['id']=='alice')
+        self.assertEqual(row['projectedPoints'],0)
+    def test_unstarted_picks_stay_private_and_stale_feed_is_labeled(self):
+        self.login();live=self.live_fixture()
+        scheduled={**live,'id':'scheduled','status':'scheduled','homeScore':99,'awayScore':0,'kickoff':datetime.datetime.fromtimestamp(time.time()+3600,datetime.timezone.utc).isoformat()}
+        with server.db() as c:
+            server.put_game(c,scheduled,2026,13);c.execute('INSERT INTO picks VALUES(?,?,?,?,?)',('carol','scheduled',2026,13,'home'))
+            c.execute('UPDATE meta SET value=? WHERE key=?',((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(minutes=5)).isoformat(),'last-2026-12'))
+        board=self.call('state?season=2026&week=13')[1]['liveStandings'];rows={r['id']:r for r in board['rows']}
+        self.assertEqual(rows['carol']['livePicks'],0);self.assertEqual(rows['carol']['projectedPoints'],0)
+        self.assertTrue(board['stale']);self.assertEqual(board['activeGames'],1)
+        other=self.call('state?season=2025&week=12')[1]['liveStandings']
+        self.assertEqual(other['activeGames'],0);self.assertTrue(all(r['projectedPoints']==0 for r in other['rows']))
+    def test_betting_odds_are_cached_independently_of_score_refresh(self):
+        with patch.dict(os.environ,{'ODDS_API_KEY':'test-only-key'}),patch.object(server,'fetch_json',return_value=[{'id':'event'}]) as fetch:
+            self.assertEqual(server.betting_odds(),[{'id':'event'}]);self.assertEqual(server.betting_odds(),[{'id':'event'}]);self.assertEqual(fetch.call_count,1)
+
 if __name__=='__main__':unittest.main()

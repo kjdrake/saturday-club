@@ -1,6 +1,6 @@
 """Background feed worker. Poll only weeks with selected games near kickoff."""
 import time, datetime
-from server import db, sync_feed, kickoff
+from server import db, sync_feed, kickoff, SCORE_REFRESH_SECONDS
 import json
 while True:
     try:
@@ -14,4 +14,4 @@ while True:
             try:print(datetime.datetime.now().isoformat(),sync_feed(season,week),flush=True)
             except Exception as e:print('Feed temporarily unavailable:',type(e).__name__,flush=True)
     except Exception as e:print('Worker error:',type(e).__name__,flush=True)
-    time.sleep(30)
+    time.sleep(SCORE_REFRESH_SECONDS)
