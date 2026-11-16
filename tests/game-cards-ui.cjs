@@ -16,3 +16,5 @@ assert.equal(run("possessionSide({...games[0],possessionId:'unknown'})"),null);a
 run("liveBoard={rows:[],activeGames:0};markLiveChanges(liveBoard,[{...games[0],downDistance:'1st & 10'}])");assert.equal(run("changedPlayIds.has('watch')"),true);
 assert(run('liveGamesPanel()').includes('Games moving the board'));
 console.log('Game card checks passed: clock/quarter/OT, possession, down and field position, timeouts, red zone, play text, saved-pick grading, missing scores, escaping and stale data.');
+
+run("games[0].status='scheduled';games[0].kickoff=new Date(Date.now()+3600000).toISOString();games[0].spreadHistory=[{previous:-3.5,spread:-6.5,changedAt:new Date().toISOString(),reason:'Entry correction'}];saved.watch='away'");assert(run('spreadCorrectionNotice(games[0])').includes('+3.5 → +6.5'));assert(run('spreadCorrectionNotice(games[0])').includes('Review your pick'));

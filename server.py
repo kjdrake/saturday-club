@@ -177,6 +177,7 @@ def sync_feed(season,week):
             for g in parsed:
                 if g['id'] in old:
                     previous=old[g['id']];g['included']=previous.get('included',False)
+                    if previous.get('spreadHistory'):g['spreadHistory']=previous['spreadHistory']
                     if g['included'] or locked(previous):g['spread']=previous.get('spread');g['bookmaker']=previous.get('bookmaker','Commissioner')
                 put_game(c,g,season,week)
             stamp=feed_checked_at;c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',(f'sync-{season}-{week}',str(time.time())));c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',(f'last-{season}-{week}',stamp))
@@ -280,6 +281,21 @@ def application(environ,start_response):
                         c.execute('UPDATE users SET active=? WHERE id=?',(int(bool(data['active'])),data['id']));c.execute('DELETE FROM sessions WHERE user_id=?',(data['id'],));result={'ok':True}
                     elif route=='admin/sync':
                         season,week=period(data);result={'message':sync_feed(season,week)}
+                    elif route=='admin/spread':
+                        season,week=period(data);c.execute('BEGIN IMMEDIATE')
+                        g=next((g for g in game_rows(c,season,week) if g['id']==data.get('id')),None)
+                        if not g:raise Problem('Unknown game',404)
+                        if locked(g):raise Problem('The game has started. Its spread is locked.',409)
+                        if not g.get('included'):raise Problem('Use the weekly slate builder to edit an unpublished game.')
+                        line=data.get('spread')
+                        if isinstance(line,bool) or not isinstance(line,(int,float)) or not math.isfinite(line) or abs(line)>100:raise Problem('Enter a spread between -100 and 100.')
+                        if data.get('expectedSpread')!=g.get('spread'):raise Problem('The spread changed since you opened it. Close and reopen the editor to review the current line.',409)
+                        if data.get('confirmed') is not True:raise Problem('Confirm that existing picks will use the corrected spread.',409)
+                        previous=g.get('spread')
+                        if line!=previous:
+                            history=list(g.get('spreadHistory',[]));history.append({'previous':previous,'spread':line,'changedAt':now_iso(),'changedBy':user['name'],'reason':str(data.get('reason','')).strip()[:240]})
+                            g.update(spread=line,spreadHistory=history,bookmaker='Commissioner correction');put_game(c,g,season,week)
+                        result={'ok':True,'spread':line,'message':'Published spread corrected. Existing picks are preserved and use the new line.'}
                     elif route=='admin/result':
                         season,week=period(data);g=next((g for g in game_rows(c,season,week) if g['id']==data.get('id')),None)
                         if not g:raise Problem('Unknown game',404)
