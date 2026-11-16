@@ -1,4 +1,5 @@
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+document.addEventListener?.('error',event=>{if(event.target?.matches?.('.team-logo')){event.target.parentElement.classList.add('logo-missing');event.target.remove()}},true);
 const seedGames=[
 {id:'1',away:'Texas',home:'Georgia',awayAbbr:'TEX',homeAbbr:'UGA',awayId:251,homeId:61,awayRank:3,homeRank:5,awayRecord:'8–1',homeRecord:'8–1',spread:-3.5,kickoff:'2026-11-14T20:30:00Z',status:'scheduled',network:'ABC',included:true},
 {id:'2',away:'Alabama',home:'Oklahoma',awayAbbr:'ALA',homeAbbr:'OU',awayId:333,homeId:201,awayRank:8,homeRank:12,awayRecord:'7–2',homeRecord:'7–2',spread:6.5,kickoff:'2026-11-14T20:30:00Z',status:'scheduled',network:'ESPN',included:true},
@@ -9,7 +10,7 @@ const seedGames=[
 const names=[['jd','Jamie Davis','JD'],['mc','Matt Carter','MC'],['sw','Sarah Wilson','SW'],['aj','Alex Johnson','AJ'],['er','Emma Reed','ER'],['cb','Chris Brooks','CB']];
 const serverBacked=document.documentElement?.dataset?.serverBacked==='true';
 let demo=!serverBacked, user=serverBacked?null:{id:'jd',name:'Jamie Davis',role:'admin'},games=serverBacked?[]:JSON.parse(localStorage.getItem('sc-games')||'null')||seedGames,picks=serverBacked?{}:JSON.parse(localStorage.getItem('sc-picks')||'{}'),saved={...picks},members=serverBacked?[]:JSON.parse(localStorage.getItem('sc-members')||'null')||names.map(([id,name,initials])=>({id,name,initials,active:true,role:id==='jd'?'admin':'member'})),tab='all',season=2026,week=12,view='picks',standings=[],lastSync=null,allSeasons=[2026,2025,2024];
-let pendingInviteCode='';
+let pendingInviteCode='',passwordResetToken='';
 let liveBoard={rows:[],activeGames:0,updatedAt:null,stale:false};
 let leaderboardMode='live',changedStandingIds=new Set(),changedScoreIds=new Set(),changedPlayIds=new Set();
 let stateRequestId=0,stateInFlight=false,pendingMutations=0,loadedPeriod=null,refreshFailed=false;
@@ -126,7 +127,7 @@ function teamBadge(game,side){
   const team=(id&&teamById.get(String(id)))||teamByName.get(normalizeTeam(game[side]));
   const logo=team?.logo||(id?'https://a.espncdn.com/i/teamlogos/ncaa/500/'+encodeURIComponent(id)+'.png':null);
   const abbreviation=game[side+'Abbr']||initials(game[side]||'?');
-  return `<span class="team-badge ${logo?'':'logo-missing'}">${logo?`<img class="team-logo" src="${esc(logo)}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.classList.add('logo-missing');this.remove()">`:''}<span class="team-fallback" aria-hidden="true">${esc(abbreviation.slice(0,4))}</span></span>`;
+  return `<span class="team-badge ${logo?'':'logo-missing'}">${logo?`<img class="team-logo" src="${esc(logo)}" alt="" loading="lazy" decoding="async">`:''}<span class="team-fallback" aria-hidden="true">${esc(abbreviation.slice(0,4))}</span></span>`;
 }
 let slateDraft=null;
 let slateFilters={search:'',conference:'all',ranking:'all',conferenceOnly:false,view:'all'};
@@ -370,6 +371,7 @@ async function socialControls(){
   }catch(error){container.innerHTML='<p class="form-status">Social sign-in is unavailable right now. Please try again later.</p>'}
 }
 function handleAuthReturn(){
+  if(passwordResetToken){resetPasswordModal();return}
   if(pendingInviteCode&&!user)accountModal();
   if(!location.search)return;
   const url=new URL(location.href),error=url.searchParams.get('auth_error'),success=url.searchParams.has('auth_success');
@@ -384,16 +386,53 @@ function handleAuthReturn(){
     accountModal();const box=$('#socialError');box.textContent='Your league session could not be opened. Allow cookies for this site, check your connection, and try signing in again.';box.hidden=false;box.focus();
   }else{rememberInvite('');toast('You’re connected. Welcome to the Club.');}
 }
+function readPasswordReset(){
+  if(!location.hash?.startsWith('#reset-password='))return;
+  passwordResetToken=location.hash.slice('#reset-password='.length).slice(0,200);
+  const url=new URL(location.href);url.hash='';window.history.replaceState(null,'',url.pathname+url.search);
+}
+function forgotPasswordModal(email=''){
+  modal(`<h2>Reset your password.</h2><p>Enter your league email. If an active account matches, we’ll email a link that expires in 30 minutes.</p><form id="forgotForm"><label class="field">Email<input name="email" type="email" autocomplete="email" value="${esc(email)}" maxlength="254" required></label><div id="forgotError" class="form-error" role="alert" tabindex="-1" hidden></div><p id="forgotStatus" class="form-status" role="status" aria-live="polite"></p><div class="form-actions"><button type="submit" class="button primary" id="sendReset">Send reset link</button><button type="button" class="button" id="backToSignin">Back to sign in</button></div></form><p class="form-status">Your password stays the same until you use the link. <a href="/privacy.html">Privacy &amp; security</a></p>`);
+  $('#backToSignin').onclick=accountModal;
+  const form=$('#forgotForm'),button=$('#sendReset');let submitting=false;
+  form.addEventListener('submit',async event=>{
+    event.preventDefault();if(submitting)return;submitting=true;button.disabled=true;button.textContent='Sending…';$('#forgotError').hidden=true;
+    try{const result=await api('password/forgot',{email:form.elements.email.value.trim()},{timeoutMs:15000});$('#forgotStatus').textContent=result.message;button.textContent='Request another link'}
+    catch(error){const box=$('#forgotError');box.textContent=error.message;box.hidden=false;box.focus();button.textContent='Send reset link'}
+    finally{submitting=false;button.disabled=false}
+  });
+}
+function resetPasswordModal(){
+  modal(`<h2>Choose a new password.</h2><p>Use a unique password or passphrase of 12 to 256 characters. Updating it signs your account out on all devices.</p><form id="resetForm"><label class="field">New password<input id="resetPassword" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label><br><label class="field">Confirm new password<input id="resetConfirmation" name="confirm" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label><button type="button" class="button password-toggle reset-toggle" id="toggleResetPassword" aria-controls="resetPassword resetConfirmation" aria-pressed="false">Show passwords</button><div id="resetError" class="form-error" role="alert" tabindex="-1" hidden></div><div class="form-actions"><button type="submit" class="button primary" id="saveNewPassword">Update password</button><button type="button" class="button" id="requestNewReset">Request a new link</button></div></form><p class="form-status">The reset link works once. If you refresh this page, reopen the link from your email.</p>`);
+  const form=$('#resetForm'),button=$('#saveNewPassword');let submitting=false;
+  $('#requestNewReset').onclick=()=>{passwordResetToken='';forgotPasswordModal()};
+  $('#toggleResetPassword').onclick=()=>{
+    const show=form.elements.password.type==='password';form.elements.password.type=show?'text':'password';form.elements.confirm.type=show?'text':'password';
+    $('#toggleResetPassword').textContent=show?'Hide passwords':'Show passwords';$('#toggleResetPassword').setAttribute('aria-pressed',String(show));
+  };
+  form.addEventListener('submit',async event=>{
+    event.preventDefault();if(submitting)return;
+    const errorBox=$('#resetError');errorBox.hidden=true;
+    if(form.elements.password.value!==form.elements.confirm.value){errorBox.textContent='Your passwords do not match.';errorBox.hidden=false;errorBox.focus();return}
+    submitting=true;button.disabled=true;button.textContent='Updating…';
+    try{
+      await api('password/reset',{token:passwordResetToken,password:form.elements.password.value},{timeoutMs:15000});
+      passwordResetToken='';rememberInvite('');await load();accountModal();$('#loginStatus').textContent='Password updated. Sign in with your new password.';
+    }catch(error){errorBox.textContent=error.message;errorBox.hidden=false;errorBox.focus()}
+    finally{submitting=false;button.disabled=false;button.textContent='Update password'}
+  });
+}
 function accountModal(){
   if(user&&!demo){
-    modal(`<h2>${esc(user.name)}</h2><p>You’re signed in as a ${esc(user.role)}.</p><p class="form-status"><a href="/privacy.html" target="_blank" rel="noopener">Privacy &amp; account data</a></p><div id="socialOptions"></div><div id="socialError" class="form-error" role="alert" tabindex="-1" hidden></div><button class="button" id="logout">Sign out</button>`);
+    modal(`<h2>${esc(user.name)}</h2><p>You’re signed in as a ${esc(user.role)}.</p><p class="form-status"><a href="/privacy.html" target="_blank" rel="noopener">Privacy &amp; security</a></p><div id="socialOptions"></div><div id="socialError" class="form-error" role="alert" tabindex="-1" hidden></div><button class="button" id="logout">Sign out</button>`);
     if(!demo)socialControls();
     $('#logout').onclick=async()=>{await api('logout',{});$('#modal').close();await load()};return;
   }
-  modal(`<h2>${demo?'Welcome to the Club.':'Sign in to Saturday Club.'}</h2><p>${demo?'This hosted preview uses sample data. Shared accounts are available when you run the included AWS backend.':'Sign in with your league account, or enter an invite code to create one.'}</p>${!demo?`<form id="loginForm"><label class="field">Email<input name="email" type="email" autocomplete="username" required></label><br><div class="password-field"><label class="field" for="loginPassword">Password</label><div class="password-controls"><input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="10" required><button type="button" class="button password-toggle" id="togglePassword" aria-controls="loginPassword" aria-pressed="false">Show password</button></div></div><br><label class="field">Invite code (new members only)<input name="code" autocomplete="off"></label><p class="form-status"><a href="/privacy.html" target="_blank" rel="noopener">Privacy &amp; account data</a></p><div id="socialOptions"></div><div id="socialError" class="form-error" role="alert" tabindex="-1" hidden></div><div id="loginError" class="form-error" role="alert" tabindex="-1" hidden></div><div class="form-actions"><button type="submit" class="button primary" id="loginSubmit">Sign in</button></div><p id="loginStatus" class="form-status" role="status" aria-live="polite"></p></form>`:'<button class="button primary" id="demoContinue">Explore the demo</button>'}`);
+  modal(`<h2>${demo?'Welcome to the Club.':'Sign in to Saturday Club.'}</h2><p>${demo?'This hosted preview uses sample data. Shared accounts are available when you run the included AWS backend.':'Sign in with your league account, or enter an invite code to create one.'}</p>${!demo?`<form id="loginForm"><label class="field">Email<input name="email" type="email" autocomplete="username" required></label><br><div class="password-field"><label class="field" for="loginPassword">Password</label><div class="password-controls"><input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="10" required><button type="button" class="button password-toggle" id="togglePassword" aria-controls="loginPassword" aria-pressed="false">Show password</button></div></div><br><label class="field">Invite code (new members only)<input name="code" autocomplete="off"></label><p class="form-status"><a href="/privacy.html" target="_blank" rel="noopener">Privacy &amp; security</a></p><div id="socialOptions"></div><div id="socialError" class="form-error" role="alert" tabindex="-1" hidden></div><div id="loginError" class="form-error" role="alert" tabindex="-1" hidden></div><div class="form-actions"><button type="submit" class="button primary" id="loginSubmit">Sign in</button></div><p id="loginStatus" class="form-status" role="status" aria-live="polite"></p><button type="button" class="text-button" id="forgotPassword">Forgot password?</button></form>`:'<button class="button primary" id="demoContinue">Explore the demo</button>'}`);
   $('#demoContinue')?.addEventListener('click',()=>$('#modal').close());
   const form=$('#loginForm');
   if(demo||!form)return;
+  $('#forgotPassword').addEventListener('click',()=>forgotPasswordModal(form.elements.email.value.trim()));
   $('#togglePassword').addEventListener('click',()=>{
     const input=form.elements.password,button=$('#togglePassword'),show=input.type==='password';
     input.type=show?'text':'password';button.textContent=show?'Hide password':'Show password';button.setAttribute('aria-pressed',String(show));
@@ -427,4 +466,4 @@ function accountModal(){
     }
   });
 }
-$('#account').onclick=accountModal;$('#mobileAccount')?.addEventListener('click',accountModal);$('#rules').onclick=()=>modal('<h2>A simple game. A long season.</h2><p>Choose either team against the commissioner’s fixed point spread. Cover: 1 point. Push: 0.5 points. Miss or no pick: 0 points.</p><p>Each game locks at kickoff. Feed lines freeze when published. Commissioners may correct a spread before kickoff; corrections are shown on the game card. Canceled games are void. Final scores determine standings; tied point totals share a rank.</p>');$('#season').onchange=()=>{season=parseInt($('#season').value);if(demo)render();else load()};window.onhashchange=render;if(serverBacked){$('#connection').textContent='● CONNECTING';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}try{pendingInviteCode=sessionStorage.getItem('sc-pending-invite')||''}catch(error){}readInvitation();render();load().then(handleAuthReturn);setInterval(refreshLive,5000);document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState!=='hidden')refreshLive()});window.addEventListener?.('online',refreshLive);
+$('#account').onclick=accountModal;$('#mobileAccount')?.addEventListener('click',accountModal);$('#rules').onclick=()=>modal('<h2>A simple game. A long season.</h2><p>Choose either team against the commissioner’s fixed point spread. Cover: 1 point. Push: 0.5 points. Miss or no pick: 0 points.</p><p>Each game locks at kickoff. Feed lines freeze when published. Commissioners may correct a spread before kickoff; corrections are shown on the game card. Canceled games are void. Final scores determine standings; tied point totals share a rank.</p>');$('#season').onchange=()=>{season=parseInt($('#season').value);if(demo)render();else load()};window.onhashchange=()=>{readPasswordReset();render();if(passwordResetToken)resetPasswordModal()};if(serverBacked){$('#connection').textContent='● CONNECTING';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}try{pendingInviteCode=sessionStorage.getItem('sc-pending-invite')||''}catch(error){}readPasswordReset();readInvitation();render();load().then(handleAuthReturn);setInterval(refreshLive,5000);document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState!=='hidden')refreshLive()});window.addEventListener?.('online',refreshLive);

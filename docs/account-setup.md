@@ -64,7 +64,7 @@ Set the app domain to `4thandsoul.com`, privacy policy to `https://4thandsoul.co
 
 Facebook must share an email to create a new league account. Existing signed-in members can connect a provider without replacing their league email. Accounts are identified by provider and stable provider user ID, never by a browser-supplied email or profile.
 
-## Automatic email through SES
+## Automatic invitation and password-reset email through SES
 
 1. In **Amazon SES**, select **us-east-1 → Verified identities → Create identity → Domain**, using `4thandsoul.com`. Enable DKIM. Use SES's Route 53 publishing option or add its supplied DKIM records in your public hosted zone. Wait for the identity to show Verified. These records do not replace the website's A record.
 2. On **SES → Account dashboard**, request production access if the account is in the sandbox. Explain the low-volume, commissioner-triggered invitations for a private friends league. Until approved, SES only sends to verified recipients (or its mailbox simulator).
@@ -73,3 +73,7 @@ Facebook must share an email to create a new league account. Existing signed-in 
 5. Test first with an address you control. Open the invitation in a private browser window, check that its code is prefilled, and complete one sign-up. Reusing the link must fail. Test real Google/Facebook sign-in after their credentials are installed; automated tests mock the external providers and do not prove that provider-console settings are correct.
 
 An email-send error cancels that invitation, leaving no active unconfirmed link. Requests are restricted to commissioners and rate-limited. Link-only invitations and prefilled texts remain available if SES is unavailable. The application does not retain the recipient's email before registration or promise delivery receipts.
+
+## Password reset emails
+
+The same SES identity, instance-role permission and runtime settings send password-reset email. No new AWS credentials or sender setup is required. After deployment, test **Sign in → Forgot password?** with an address you control, then open the email and choose a new password. Links expire after 30 minutes, work once, and revoke existing sessions on success. The request response is intentionally identical for unknown, disabled and active accounts; it does not guarantee inbox delivery. In the SES sandbox the recipient still must be verified. See [security operations](security.md) for details and operator recovery.
