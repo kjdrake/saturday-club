@@ -21,6 +21,19 @@ def main():
     args = parser.parse_args()
     base = 'https://site.api.espn.com/apis/site/v2/sports/football/college-football/'
     directory = fetch_json(base + 'teams?limit=1000')['sports'][0]['leagues'][0]['teams']
+    conference_names={'1':'ACC','4':'Big 12','5':'Big Ten','8':'SEC','9':'Pac-12','12':'Conference USA','15':'MAC','17':'Mountain West','18':'FBS Independents','37':'Sun Belt','151':'American'}
+    conferences={}
+    def conference_teams(node, root):
+        for entry in node.get('standings',{}).get('entries',[]):
+            conferences[str(entry['team']['id'])]={'id':str(root['id']),'name':conference_names.get(str(root['id']),root['name'])}
+        for child in node.get('children',[]):
+            conference_teams(child,root)
+    try:
+        standings=fetch_json(f'https://site.api.espn.com/apis/v2/sports/football/college-football/standings?season={args.season}')
+        for conference in standings.get('children',[]):
+            conference_teams(conference,conference)
+    except OSError:
+        print('Conference directory unavailable; feed conference metadata will still be used.')
     ids = set()
     for week in args.weeks:
         feed = fetch_json(base + f'scoreboard?groups=80&limit=200&dates={args.season}&seasontype=2&week={week}')
@@ -48,6 +61,9 @@ def main():
                           ['displayName', 'shortDisplayName', 'location', 'abbreviation', 'name'] if team.get(key))),
                       'logo': f'assets/team-logos/{team_id}.png' if (folder / (team_id + '.png')).exists()
                           else f'https://a.espncdn.com/i/teamlogos/ncaa/500/{team_id}.png'})
+    for team in teams:
+        if team['id'] in conferences:
+            team['conference']=conferences[team['id']]
     (ROOT / 'dist/teams.js').write_text('window.COLLEGE_TEAMS = ' + json.dumps(teams, separators=(',', ':')) + ';\n')
     print(f'Cached {cached}/{len(ids)} logos; indexed {len(teams)} schools. Missing logos use the public CDN or an abbreviation fallback.')
 

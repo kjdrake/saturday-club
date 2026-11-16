@@ -76,3 +76,13 @@ To refresh the directory and cache logos for another set of regular-season weeks
 ```sh
 python infra/fetch_team_logos.py --season 2026 --weeks 11 12 13
 ```
+
+## Build a weekly slate
+
+In **Commissioner tools**, choose the week at the top and click **Refresh games**. Use the search, conference selector, and ranking selector to find matchups. A conference filter includes games involving either team from that conference; **Conference matchups only** requires both teams to share a conference and excludes independents. Rankings support **Any Top 25 team** or **Top 25 vs. Top 25** (both teams ranked 1–25).
+
+Check games individually or use **Add visible** / **Remove visible** for the filtered results. Selections survive filter changes and feed refreshes while you keep the page open. **Your slate** shows the selected games for review; **Publish weekly slate** saves only changed games, preserving selections hidden by a filter. Draft changes are held in the browser until published; publish or discard them before changing weeks or reloading the page. A missing spread must be entered before a game can be selected. Started games and games with submitted picks cannot be removed, and published spreads stay frozen.
+
+Players receive only published games and may pick as many or as few as they like. Clicking an already selected side again clears it before kickoff; save picks to persist the change. A skipped game earns 0 points and does not count as a loss in W–L–P. Existing season records and picks are preserved by this update.
+
+Conference IDs are captured from the public ESPN game feed when refreshed. The local school directory supplies conference labels for manually entered games and older records that have no stored conference metadata; that directory reflects the season used to generate it. Unknown schools appear as **Other / unknown** rather than being assigned a conference by guesswork.
