@@ -31,6 +31,7 @@ jobs:
           node tests/ui.cjs
           node tests/auth-ui.cjs
           node tests/slate-ui.cjs
+          node tests/live-ui.cjs
           python -m py_compile server.py sync.py ops/backup.py
           for script in infra/*.sh; do bash -n "$script"; done
           python -m unittest discover -s infra/tests -v

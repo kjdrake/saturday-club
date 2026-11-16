@@ -3,6 +3,7 @@ import os, json, sqlite3, hashlib, secrets, hmac, time, datetime, urllib.request
 from pathlib import Path
 from http.cookies import SimpleCookie
 BASE=Path(__file__).parent
+SCORE_REFRESH_SECONDS=15
 DB=os.getenv('DATABASE_PATH',str(BASE/'data'/'club.db'))
 CONFERENCES={'1': 'ACC', '4': 'Big 12', '5': 'Big Ten', '8': 'SEC', '9': 'Pac-12', '12': 'Conference USA', '15': 'MAC', '17': 'Mountain West', '18': 'FBS Independents', '37': 'Sun Belt', '151': 'American'}
 SECURE=os.getenv('COOKIE_SECURE','true').lower()=='true'
@@ -38,31 +39,74 @@ def game_rows(c,season,week=None):
     else:rows=c.execute('SELECT data FROM games WHERE season=? AND week=?',(season,week))
     return [json.loads(r['data']) for r in rows]
 def put_game(c,g,season,week):c.execute('INSERT OR REPLACE INTO games VALUES(?,?,?,?)',(g['id'],season,week,json.dumps(g)))
-def points(g,side):
-    if g.get('status')!='final' or g.get('spread') is None or not g.get('included'):return None
+def points(g,side,include_live=False):
+    statuses=('final','live') if include_live else ('final',)
+    if g.get('status') not in statuses or g.get('spread') is None or not g.get('included'):return None
     if g.get('homeScore') is None or g.get('awayScore') is None:return None
     margin=g['homeScore']+g['spread']-g['awayScore']
     return .5 if margin==0 else int((side=='home' and margin>0)or(side=='away' and margin<0))
-def standings(c,season):
-    gs={(g['id'],w):g for w in range(1,19) for g in game_rows(c,season,w)}
-    rows=[]
-    for u in c.execute('SELECT id,name FROM users'):
-        row=dict(u);row.update(wins=0,losses=0,pushes=0,points=0)
-        for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=?',(u['id'],season)):
-            score=points(gs.get((p['game_id'],p['week']),{}),p['side'])
-            if score is not None:
-                row['points']+=score;row['wins' if score==1 else 'pushes' if score==.5 else 'losses']+=1
-        rows.append(row)
-    return sorted(rows,key=lambda p:(-p['points'],p['name']))
+def ranked(rows,key):
+    ordered=sorted(rows,key=lambda row:(-row[key],row['name'].casefold(),row['id']))
+    previous=None;rank=0
+    for index,row in enumerate(ordered,1):
+        if row[key]!=previous:rank=index
+        row['rank']=rank;previous=row[key]
+    return ordered
+def standings(c,season,include_live=False):
+    # One snapshot of every saved game/pick in this season, across all weeks.
+    gs={(row['id'],row['week']):json.loads(row['data']) for row in c.execute('SELECT id,week,data FROM games WHERE season=?',(season,))}
+    rows={u['id']:{**dict(u),'wins':0,'losses':0,'pushes':0,'points':0} for u in c.execute('SELECT id,name FROM users')}
+    live={uid:{'livePoints':0,'liveWins':0,'liveLosses':0,'livePushes':0,'livePicks':0} for uid in rows}
+    for pick in c.execute('SELECT user_id,game_id,week,side FROM picks WHERE season=?',(season,)):
+        row=rows.get(pick['user_id']);game=gs.get((pick['game_id'],pick['week']),{})
+        if row is None:continue
+        score=points(game,pick['side'])
+        if score is not None:
+            row['points']+=score;row['wins' if score==1 else 'pushes' if score==.5 else 'losses']+=1
+        elif game.get('status')=='live':
+            projected=points(game,pick['side'],include_live=True)
+            if projected is not None:
+                item=live[pick['user_id']];item['livePoints']+=projected;item['livePicks']+=1
+                item['liveWins' if projected==1 else 'livePushes' if projected==.5 else 'liveLosses']+=1
+    official=ranked(list(rows.values()),'points')
+    if not include_live:return official
+    projections=[{**row,**live[row['id']],'officialRank':row['rank'],'projectedPoints':row['points']+live[row['id']]['livePoints']} for row in official]
+    projections=ranked(projections,'projectedPoints')
+    for row in projections:row['movement']=row['officialRank']-row['rank']
+    live_games=[(key,g) for key,g in gs.items() if g.get('included') and g.get('status')=='live']
+    stamps=[];missing=False
+    for week in {key[1] for key,g in live_games}:
+        stamp=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
+        if stamp:
+            try:stamps.append(datetime.datetime.fromisoformat(stamp['value'].replace('Z','+00:00')))
+            except (ValueError,TypeError):missing=True
+        else:missing=True
+    oldest=min(stamps) if stamps else None
+    stale=bool(live_games) and (missing or oldest is None or time.time()-oldest.timestamp()>60)
+    return official,{'rows':projections,'activeGames':len(live_games),'updatedAt':oldest.isoformat() if oldest else None,'stale':stale,'scoreRefreshSeconds':SCORE_REFRESH_SECONDS}
 def fetch_json(url):
     with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'SaturdayClub/1.0'}),timeout=15) as r:return json.load(r)
+def betting_odds():
+    # Scores can refresh quickly without spending a betting-feed credit each time.
+    with db() as c:
+        record=c.execute("SELECT value FROM meta WHERE key='betting-odds-cache'").fetchone()
+    cached=json.loads(record['value']) if record else None
+    if cached and time.time()-cached['fetchedAt']<600:return cached['events']
+    try:
+        events=fetch_json('https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/odds/?'+urllib.parse.urlencode({'apiKey':os.environ['ODDS_API_KEY'],'regions':'us','markets':'spreads','oddsFormat':'american'}))
+        if not isinstance(events,list):raise ValueError('Unexpected betting feed response')
+        with db() as c:c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('betting-odds-cache',json.dumps({'fetchedAt':time.time(),'events':events})))
+        return events
+    except Exception:
+        if cached:return cached['events']
+        raise
 _sync_lock=threading.Lock()
 def sync_feed(season,week):
     if not _sync_lock.acquire(blocking=False):return 'A feed sync is already in progress.'
     try:
         with db() as c:
             last=c.execute('SELECT value FROM meta WHERE key=?',(f'sync-{season}-{week}',)).fetchone()
-            if last and time.time()-float(last['value'])<25:return 'Feed was refreshed less than 25 seconds ago.'
+            if last and time.time()-float(last['value'])<12:return 'Feed was refreshed less than 12 seconds ago.'
         feed=fetch_json(f'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=100&dates={season}&seasontype=2&week={week}')
         parsed=[]
         for e in feed.get('events',[]):
@@ -81,7 +125,7 @@ def sync_feed(season,week):
         warning=''
         if os.getenv('ODDS_API_KEY'):
             try:
-                odds=fetch_json('https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/odds/?'+urllib.parse.urlencode({'apiKey':os.environ['ODDS_API_KEY'],'regions':'us','markets':'spreads','oddsFormat':'american'}))
+                odds=betting_odds()
                 for g in parsed:
                     for e in odds:
                         if e['home_team'].casefold()==g['home'].casefold() and e['away_team'].casefold()==g['away'].casefold():
@@ -120,7 +164,9 @@ def application(environ,start_response):
             p=BASE/'dist'/('index.html' if path=='/' else path.lstrip('/'))
             if not p.resolve().is_relative_to((BASE/'dist').resolve()) or not p.is_file():raise Problem('Not found',404)
             mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png'}.get(p.suffix,'application/octet-stream')
-            content=p.read_bytes();start_response('200 OK',headers+[('Content-Type',mime)]);return [content if method=='GET' else b'']
+            content=p.read_bytes()
+            if p.name=='index.html':content=content.replace(b'<html lang="en">',b'<html lang="en" data-server-backed="true">',1)
+            start_response('200 OK',headers+[('Content-Type',mime)]);return [content if method=='GET' else b'']
         headers.append(('Cache-Control','no-store'))
         if method=='POST':
             # Same-origin checks plus JSON-only requests prevent cross-site form CSRF.
@@ -160,13 +206,14 @@ def application(environ,start_response):
                 if route!='health' and not user:raise Problem('Sign in required',401)
                 if route=='health':result={'ok':True}
                 elif route=='state' and method=='GET':
-                    season,week=period(data);state_games=game_rows(c,season,week)
+                    season,week=period(data);c.execute('BEGIN');state_games=game_rows(c,season,week)
                     if user['role']=='admin':
                         picked={row[0] for row in c.execute('SELECT DISTINCT game_id FROM picks WHERE season=? AND week=?',(season,week))}
                         state_games=[{**g,'hasPicks':g['id'] in picked} for g in state_games]
                     else:state_games=[g for g in state_games if g.get('included')]
                     last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
-                    result={'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':standings(c,season),'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    official,live_board=standings(c,season,include_live=True)
+                    result={'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
                 elif route=='picks' and method=='POST':
                     season,week=period(data);submitted=data.get('picks',{})
                     if not isinstance(submitted,dict):raise Problem('Invalid picks')
