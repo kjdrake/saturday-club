@@ -71,5 +71,11 @@ const submit=h=>h.form.submit({preventDefault(){}});
     await h.el('#social-facebook').click();
     assert.equal(h.el('#socialError').hidden,false);assert.match(h.el('#socialError').textContent,/expired invitation/);
   }
+  {
+    const h=await ready();
+    h.run("location.search='?auth_success=1';location.href='https://4thandsoul.com/?auth_success=1';window.history={replaceState(){}};handleAuthReturn()");
+    assert.equal(h.el('#socialError').hidden,false);assert.match(h.el('#socialError').textContent,/Allow cookies/);
+    assert.equal(h.el('#modal').open,true);
+  }
   console.log('Sign-in regression checks passed: visible errors, pending state, duplicate prevention, success, cookie failure, network failure, timeout, invalid response, and registration.');
 })().catch(error=>{console.error(error);process.exitCode=1});

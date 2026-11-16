@@ -380,6 +380,8 @@ function handleAuthReturn(){
     accountModal();
     const messages={expired:'This sign-in attempt expired or was already used. Please try again.',cancelled:'Sign-in was cancelled. Your invitation has not been used.',invite:'A valid, unused invitation is required to join Saturday Club.',email:'Your provider must share an email address to create your account.',existing:'This email already has a league account. Sign in with your existing method, then connect this provider from your account.',disabled:'This league account is disabled. Contact your commissioner.',link:'Sign in to the original league account again before connecting this provider.',connected:'This provider account is already connected to another league account.'};
     const box=$('#socialError');box.textContent=messages[error]||'We could not verify your provider account. Please try again.';box.hidden=false;box.focus();
+  }else if(!user){
+    accountModal();const box=$('#socialError');box.textContent='Your league session could not be opened. Allow cookies for this site, check your connection, and try signing in again.';box.hidden=false;box.focus();
   }else{rememberInvite('');toast('You’re connected. Welcome to the Club.');}
 }
 function accountModal(){
