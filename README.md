@@ -21,7 +21,7 @@ export COOKIE_SECURE=false
 python server.py
 ```
 
-Open http://localhost:8000. In another terminal run `python sync.py` for background updates. Set the same DATABASE_PATH if overriding it. For production use Gunicorn via Docker; wsgiref is only a development server. ADMIN_PASSWORD bootstraps the first account only. Remove the bootstrap environment values after creating the admin. Keep the password in a password manager. Password reset currently requires a server operator to update the stored password hash; there is no email reset flow.
+Open http://localhost:8000. In another terminal run `python sync.py` for background updates. Set the same DATABASE_PATH if overriding it. For production use Gunicorn via Docker; wsgiref is only a development server. ADMIN_PASSWORD bootstraps the first account only. Remove the bootstrap environment values after creating the admin. Keep the password in a password manager. Members can use Forgot password? once SES email is configured; see [password recovery and security](docs/security.md). Changing ADMIN_PASSWORD after bootstrap does not change an existing account password.
 
 ## Automatic AWS deployments with GitHub Actions
 
@@ -114,3 +114,7 @@ Existing picks remain on the same team and use the corrected spread for scoring.
 Commissioner tools can create a seven-day, single-use invitation link, open a prefilled text, or send an invitation email through SES. Invitation links prefill the registration code. Google and Facebook sign-up remain invitation-only; existing members connect providers from their signed-in profile to keep their account and picks. Provider buttons appear only after configuration. Email/password sign-in remains available.
 
 Follow [account and email setup](docs/account-setup.md) for provider callback URLs, Secrets Manager settings, SES domain verification, and the one-time infrastructure/deployer update required on existing servers. Real provider authorization and email delivery require that setup; deploying code alone does not activate them.
+
+## Password recovery and member security
+
+Sign in → **Forgot password?** emails a 30-minute, single-use recovery link when SES is configured. No account is created, the response does not disclose membership, and a successful reset revokes all sessions and outstanding recovery links while preserving picks and roles. See [security and recovery operations](docs/security.md) for setup, limitations, and operator recovery. The public [privacy and security page](https://4thandsoul.com/privacy.html) explains implemented controls without claiming a security certification.

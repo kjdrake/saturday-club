@@ -4,6 +4,7 @@ from pathlib import Path
 from http.cookies import SimpleCookie
 import social_auth
 import invitations
+import password_reset
 BASE=Path(__file__).parent
 SCORE_REFRESH_SECONDS=15
 DB=os.getenv('DATABASE_PATH',str(BASE/'data'/'club.db'))
@@ -19,14 +20,18 @@ CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT);
 '''
 def db():
     Path(DB).parent.mkdir(parents=True,exist_ok=True)
-    c=sqlite3.connect(DB,timeout=20);c.row_factory=sqlite3.Row;c.execute('PRAGMA journal_mode=WAL');return c
+    c=sqlite3.connect(DB,timeout=20);os.chmod(DB,0o600);c.row_factory=sqlite3.Row;c.execute('PRAGMA journal_mode=WAL')
+    for suffix in ('-wal','-shm'):
+        try:os.chmod(DB+suffix,0o600)
+        except FileNotFoundError:pass
+    return c
 def pw_hash(password,salt=None):
     salt=salt or secrets.token_hex(16)
     return salt+':'+hashlib.scrypt(password.encode(),salt=salt.encode(),n=16384,r=8,p=1).hex()
 def verify(password,hashed):return hmac.compare_digest(pw_hash(password,hashed.split(':')[0]),hashed)
 def initialize():
     with db() as c:
-        c.executescript(SCHEMA + social_auth.SCHEMA)
+        c.executescript(SCHEMA + social_auth.SCHEMA + password_reset.SCHEMA)
         email=os.getenv('ADMIN_EMAIL');password=os.getenv('ADMIN_PASSWORD')
         if not c.execute('SELECT 1 FROM users LIMIT 1').fetchone() and email and password:
             if len(password)<12:raise ValueError('ADMIN_PASSWORD must be at least 12 characters')
@@ -203,7 +208,9 @@ def session_cookie(c, uid, headers):
     headers.append(('Set-Cookie',f'sc_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800'+('; Secure' if SECURE else '')))
 
 def application(environ,start_response):
-    headers=[('X-Content-Type-Options','nosniff'),('Referrer-Policy','no-referrer'),('X-Frame-Options','DENY')]
+    headers=[('X-Content-Type-Options','nosniff'),('Referrer-Policy','no-referrer'),('X-Frame-Options','DENY'),
+             ('Permissions-Policy','camera=(), microphone=(), geolocation=()'),
+             ('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://a.espncdn.com; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")]
     try:
         path=environ.get('PATH_INFO','/');method=environ['REQUEST_METHOD']
         if not path.startswith('/api/'):
@@ -231,7 +238,30 @@ def application(environ,start_response):
             cookie=SimpleCookie();cookie.load(environ.get('HTTP_COOKIE',''));token=cookie['sc_session'].value if 'sc_session' in cookie else ''
             u=c.execute('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token=? AND s.expires>? AND u.active=1',(hashlib.sha256(token.encode()).hexdigest(),time.time())).fetchone()
             user=dict(u) if u else None
-            if route=='auth/providers' and method=='GET':
+            if route=='password/forgot' and method=='POST':
+                email=str(data.get('email','')).strip().lower()
+                if not invitations.valid_email(email):raise Problem('Enter a valid email address.')
+                if not invitations.ready():raise Problem('Password reset email is not available yet. Contact your commissioner for help.',503)
+                allowed=True
+                try:limit('password-forgot-'+environ.get('REMOTE_ADDR','unknown'))
+                except Problem:allowed=False
+                if allowed:password_reset.enqueue(email,db)
+                result={'ok':True,'message':password_reset.MESSAGE}
+            elif route=='password/reset' and method=='POST':
+                limit('password-reset-'+environ.get('REMOTE_ADDR','unknown'))
+                reset_token=str(data.get('token',''));password=str(data.get('password',''))
+                if not 12<=len(password)<=256:raise Problem('Use a password or passphrase of 12 to 256 characters.')
+                if len(reset_token)!=43:raise Problem('This reset link is invalid, expired, or already used. Request a new link.',400)
+                c.execute('BEGIN IMMEDIATE')
+                reset=c.execute('SELECT r.user_id FROM password_resets r JOIN users u ON u.id=r.user_id WHERE r.token=? AND r.expires>? AND u.active=1',(password_reset.digest(reset_token),time.time())).fetchone()
+                if not reset:raise Problem('This reset link is invalid, expired, or already used. Request a new link.',400)
+                c.execute('UPDATE users SET password=? WHERE id=?',(pw_hash(password),reset['user_id']))
+                c.execute('DELETE FROM sessions WHERE user_id=?',(reset['user_id'],))
+                c.execute('DELETE FROM password_resets WHERE user_id=?',(reset['user_id'],))
+                c.execute('DELETE FROM oauth_requests WHERE link_user=?',(reset['user_id'],))
+                headers.append(('Set-Cookie','sc_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'+('; Secure' if SECURE else '')))
+                result={'ok':True,'message':'Password updated. Sign in again with your new password.'}
+            elif route=='auth/providers' and method=='GET':
                 result={'providers':[{'id':p,'name':name,'connected':bool(user and c.execute('SELECT 1 FROM social_identities WHERE provider=? AND user_id=?',(p,user['id'])).fetchone())} for p,name in social_auth.LABELS.items() if social_auth.config(p)]}
             elif route=='auth/start' and method=='POST':
                 limit(environ.get('REMOTE_ADDR','unknown'))

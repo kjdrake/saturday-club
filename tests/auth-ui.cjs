@@ -77,5 +77,33 @@ const submit=h=>h.form.submit({preventDefault(){}});
     assert.equal(h.el('#socialError').hidden,false);assert.match(h.el('#socialError').textContent,/Allow cookies/);
     assert.equal(h.el('#modal').open,true);
   }
+  {
+    const h=await ready(),form=h.el('#forgotForm');form.elements={email:{value:'admin@example.com'}};
+    h.run('forgotPasswordModal()');h.calls.length=0;
+    let finish;h.setHandler(()=>new Promise(resolve=>finish=resolve));
+    const pending=form.submit({preventDefault(){}});await form.submit({preventDefault(){}});
+    assert.equal(h.calls.length,1);assert.equal(h.calls[0].url,'/api/password/forgot');assert.equal(h.el('#sendReset').disabled,true);
+    finish(response(200,{message:'If an active account matches that email, a reset link will arrive.'}));await pending;
+    assert.match(h.el('#forgotStatus').textContent,/If an active account/);assert.equal(h.el('#sendReset').disabled,false);
+    h.setHandler(async()=>response(503,{error:'Password reset email is not available yet.'}));await form.submit({preventDefault(){}});
+    assert.equal(h.el('#forgotError').hidden,false);assert.match(h.el('#forgotError').textContent,/not available/);
+  }
+  {
+    const h=await ready(),form=h.el('#resetForm');form.elements={password:{value:'new-password-1234',type:'password'},confirm:{value:'different-password',type:'password'}};
+    h.run("passwordResetToken='a'.repeat(43);resetPasswordModal()");h.calls.length=0;
+    await form.submit({preventDefault(){}});assert.equal(h.calls.length,0);assert.match(h.el('#resetError').textContent,/do not match/);
+    form.elements.confirm.value=form.elements.password.value;
+    h.el('#toggleResetPassword').onclick();assert.equal(form.elements.password.type,'text');assert.equal(form.elements.confirm.type,'text');
+    h.el('#toggleResetPassword').onclick();assert.equal(form.elements.password.type,'password');
+    h.setHandler(async url=>url==='/api/password/reset'?response(200,{ok:true}):response(401,{error:'Sign in required'}));
+    await form.submit({preventDefault(){}});assert.equal(h.calls[0].url,'/api/password/reset');assert.equal(JSON.parse(h.calls[0].options.body).token,'a'.repeat(43));
+    assert.equal(h.run('passwordResetToken'),'');assert.match(h.el('#loginStatus').textContent,/Password updated/);
+  }
+  {
+    const h=await ready(),form=h.el('#resetForm');form.elements={password:{value:'new-password-1234'},confirm:{value:'new-password-1234'}};
+    h.run("passwordResetToken='a'.repeat(43);resetPasswordModal()");h.calls.length=0;
+    h.setHandler(async()=>response(400,{error:'This reset link is invalid, expired, or already used.'}));await form.submit({preventDefault(){}});
+    assert.equal(h.el('#resetError').hidden,false);assert.match(h.el('#resetError').textContent,/expired/);assert.equal(h.el('#saveNewPassword').disabled,false);
+  }
   console.log('Sign-in regression checks passed: visible errors, pending state, duplicate prevention, success, cookie failure, network failure, timeout, invalid response, and registration.');
 })().catch(error=>{console.error(error);process.exitCode=1});

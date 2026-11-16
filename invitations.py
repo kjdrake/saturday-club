@@ -16,7 +16,7 @@ def valid_email(email):
 def ready():
     return bool(public_url() and valid_email(os.getenv('SES_FROM_EMAIL', '')))
 
-def send_email(recipient, name, link):
+def send_message(recipient, subject, text):
     # The SDK uses short-lived instance-role credentials, never browser/GitHub keys.
     import boto3
     from botocore.config import Config
@@ -24,8 +24,14 @@ def send_email(recipient, name, link):
     response = client.send_email(
         FromEmailAddress=os.environ['SES_FROM_EMAIL'], Destination={'ToAddresses':[recipient]},
         Content={'Simple':{
-            'Subject':{'Data':'Your invitation to Saturday Club','Charset':'UTF-8'},
-            'Body':{'Text':{'Data':f"Hi {name},\n\nYou're invited to Saturday Club by 4th & Soul. Join our college football pick'em league:\n\n{link}\n\nThis invitation can be used once and expires in seven days. Create an account with your email and password, or use Google or Facebook when available.\n\nSee you Saturday!",'Charset':'UTF-8'}},
+            'Subject':{'Data':subject,'Charset':'UTF-8'},
+            'Body':{'Text':{'Data':text,'Charset':'UTF-8'}},
         }},
     )
     return response['MessageId']
+
+def send_email(recipient, name, link):
+    return send_message(recipient, 'Your invitation to Saturday Club', f"Hi {name},\n\nYou're invited to Saturday Club by 4th & Soul. Join our college football pick'em league:\n\n{link}\n\nThis invitation can be used once and expires in seven days. Create an account with your email and password, or use Google or Facebook when available.\n\nSee you Saturday!")
+
+def send_password_reset(recipient, name, link):
+    return send_message(recipient, 'Reset your Saturday Club password', f"Hi {name},\n\nUse this link to choose a new Saturday Club password:\n\n{link}\n\nThis link expires in 30 minutes and works once. Your existing password is unchanged until you submit a new one. If you did not request this, ignore this email. Never share this link or your password.\n\nSaturday Club by 4th & Soul")
