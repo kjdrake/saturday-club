@@ -164,7 +164,9 @@ def application(environ,start_response):
             p=BASE/'dist'/('index.html' if path=='/' else path.lstrip('/'))
             if not p.resolve().is_relative_to((BASE/'dist').resolve()) or not p.is_file():raise Problem('Not found',404)
             mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png'}.get(p.suffix,'application/octet-stream')
-            content=p.read_bytes();start_response('200 OK',headers+[('Content-Type',mime)]);return [content if method=='GET' else b'']
+            content=p.read_bytes()
+            if p.name=='index.html':content=content.replace(b'<html lang="en">',b'<html lang="en" data-server-backed="true">',1)
+            start_response('200 OK',headers+[('Content-Type',mime)]);return [content if method=='GET' else b'']
         headers.append(('Cache-Control','no-store'))
         if method=='POST':
             # Same-origin checks plus JSON-only requests prevent cross-site form CSRF.

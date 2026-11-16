@@ -25,5 +25,6 @@ const response=d=>({ok:true,status:200,json:async()=>JSON.parse(JSON.stringify(d
  handler=async()=>{throw Error('network lost')};await run('refreshLive()');assert.equal(run('refreshFailed'),true);assert.match(run('liveStatus()'),/Connection interrupted/);assert.equal(run('picks.open'),'home');
  handler=async()=>response(next);await run('refreshLive()');assert.equal(run('refreshFailed'),false);
  context.document.visibilityState='hidden';const before=calls.length;await run('refreshLive()');assert.equal(calls.length,before);
+ const startupContext={...context,document:{...context.document,documentElement:{dataset:{serverBacked:'true'}}},window:{},fetch:async()=>{throw Error('Server offline')}};vm.createContext(startupContext);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),startupContext);await new Promise(setImmediate);assert.equal(vm.runInContext('demo',startupContext),false);assert.equal(vm.runInContext('games.length',startupContext),0);assert.equal(vm.runInContext('refreshFailed',startupContext),true);
  console.log('Live UI checks passed: unsaved selections/clears, live totals, final mode, stale-response protection, connection recovery and hidden-tab pause.');
 })().catch(error=>{console.error(error);process.exitCode=1});

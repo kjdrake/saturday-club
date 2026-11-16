@@ -49,7 +49,9 @@ def client(base):
 try:
     base = start()
     with urllib.request.urlopen(base, timeout=5) as r:
-        assert 'Saturday Club' in r.read().decode()
+        html=r.read().decode()
+        assert 'Saturday Club' in html
+        assert 'data-server-backed="true"' in html
     with urllib.request.urlopen(base + '/assets/team-logos/251.png', timeout=5) as r:
         assert r.headers.get_content_type() == 'image/png'
         assert r.read(8) == b'\x89PNG\r\n\x1a\n'

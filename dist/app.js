@@ -7,7 +7,8 @@ const seedGames=[
 {id:'5',away:'Michigan',home:'Ohio State',awayAbbr:'MICH',homeAbbr:'OSU',awayId:130,homeId:194,awayRank:18,homeRank:2,awayRecord:'6–3',homeRecord:'8–1',spread:-10.5,kickoff:'2026-11-14T17:00:00Z',status:'live',period:'Q3 · 08:42',awayScore:14,homeScore:21,network:'FOX',included:true},
 {id:'6',away:'LSU',home:'Florida',awayAbbr:'LSU',homeAbbr:'FLA',awayId:99,homeId:57,awayRank:16,homeRank:null,awayRecord:'6–3',homeRecord:'5–4',spread:4.5,kickoff:'2026-11-14T17:00:00Z',status:'final',awayScore:24,homeScore:27,network:'ABC',included:true}];
 const names=[['jd','Jamie Davis','JD'],['mc','Matt Carter','MC'],['sw','Sarah Wilson','SW'],['aj','Alex Johnson','AJ'],['er','Emma Reed','ER'],['cb','Chris Brooks','CB']];
-let demo=true, user={id:'jd',name:'Jamie Davis',role:'admin'},games=JSON.parse(localStorage.getItem('sc-games')||'null')||seedGames,picks=JSON.parse(localStorage.getItem('sc-picks')||'{}'),saved={...picks},members=JSON.parse(localStorage.getItem('sc-members')||'null')||names.map(([id,name,initials])=>({id,name,initials,active:true,role:id==='jd'?'admin':'member'})),tab='all',season=2026,week=12,view='picks',standings=[],lastSync=null,allSeasons=[2026,2025,2024];
+const serverBacked=document.documentElement?.dataset?.serverBacked==='true';
+let demo=!serverBacked, user=serverBacked?null:{id:'jd',name:'Jamie Davis',role:'admin'},games=serverBacked?[]:JSON.parse(localStorage.getItem('sc-games')||'null')||seedGames,picks=serverBacked?{}:JSON.parse(localStorage.getItem('sc-picks')||'{}'),saved={...picks},members=serverBacked?[]:JSON.parse(localStorage.getItem('sc-members')||'null')||names.map(([id,name,initials])=>({id,name,initials,active:true,role:id==='jd'?'admin':'member'})),tab='all',season=2026,week=12,view='picks',standings=[],lastSync=null,allSeasons=[2026,2025,2024];
 let liveBoard={rows:[],activeGames:0,updatedAt:null,stale:false};
 let leaderboardMode='live',changedStandingIds=new Set(),changedScoreIds=new Set();
 let stateRequestId=0,stateInFlight=false,pendingMutations=0,loadedPeriod=null,refreshFailed=false;
@@ -55,7 +56,7 @@ function refreshLiveRegions(){
   document.querySelectorAll('[data-live-status]').forEach(element=>element.textContent=liveStatus());
 }
 async function refreshLive(){
-  if(demo||stateInFlight||pendingMutations||document.visibilityState==='hidden')return;
+  if(demo||(!user&&!refreshFailed)||stateInFlight||pendingMutations||document.visibilityState==='hidden')return;
   await load({background:true});
 }
 function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';clearTimeout(window.tt);window.tt=setTimeout(()=>$('#toast').style.display='none',3500)}
@@ -92,7 +93,7 @@ async function load({requireUser=false,background=false}={}){
   }catch(error){
     if(requestId!==stateRequestId)return;
     if(requireUser){if(error.status===401)throw Error('Your sign-in could not be confirmed. Please allow cookies for this site and try again.');throw error}
-    if(error.status===401){demo=false;user=null;games=[];picks={};saved={};members=[];standings=[];liveBoard={rows:[],activeGames:0,updatedAt:null,stale:false};loadedPeriod=null;$('#connection').textContent='● SIGN IN TO PLAY';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}
+    if(error.status===401){demo=false;user=null;games=[];picks={};saved={};members=[];standings=[];liveBoard={rows:[],activeGames:0,updatedAt:null,stale:false};loadedPeriod=null;refreshFailed=false;$('#connection').textContent='● SIGN IN TO PLAY';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}
     else if(!demo){refreshFailed=true;changedStandingIds=new Set();changedScoreIds=new Set();$('#connection').textContent='● RECONNECTING';if(!background)toast('Could not refresh. Showing last received data.')}
   }finally{if(requestId===stateRequestId)stateInFlight=false}
   if(background&&view==='admin'){refreshLiveRegions();return}
@@ -277,4 +278,4 @@ function accountModal(){
     }
   });
 }
-$('#account').onclick=accountModal;$('#rules').onclick=()=>modal('<h2>A simple game. A long season.</h2><p>Choose either team against the commissioner’s fixed point spread. Cover: 1 point. Push: 0.5 points. Miss or no pick: 0 points.</p><p>Each game locks at kickoff. Spreads freeze when the commissioner includes the game in the weekly slate. Canceled games are void. Final scores determine standings; tied point totals share a rank.</p>');$('#season').onchange=()=>{season=parseInt($('#season').value);if(demo)render();else load()};window.onhashchange=render;render();load();setInterval(refreshLive,5000);document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState!=='hidden')refreshLive()});window.addEventListener?.('online',refreshLive);
+$('#account').onclick=accountModal;$('#rules').onclick=()=>modal('<h2>A simple game. A long season.</h2><p>Choose either team against the commissioner’s fixed point spread. Cover: 1 point. Push: 0.5 points. Miss or no pick: 0 points.</p><p>Each game locks at kickoff. Spreads freeze when the commissioner includes the game in the weekly slate. Canceled games are void. Final scores determine standings; tied point totals share a rank.</p>');$('#season').onchange=()=>{season=parseInt($('#season').value);if(demo)render();else load()};window.onhashchange=render;if(serverBacked){$('#connection').textContent='● CONNECTING';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}render();load();setInterval(refreshLive,5000);document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState!=='hidden')refreshLive()});window.addEventListener?.('online',refreshLive);
