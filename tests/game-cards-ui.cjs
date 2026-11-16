@@ -1,0 +1,18 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const elements=new Map();const el=s=>{if(!elements.has(s))elements.set(s,{innerHTML:'',textContent:'',style:{},addEventListener(type,fn){this[type]=fn},showModal(){},close(){}});return elements.get(s)};
+const context={document:{querySelector:el,querySelectorAll:()=>[]},localStorage:{getItem:()=>null},location:{hash:'#picks'},window:{},AbortController,setTimeout:()=>1,clearTimeout(){},setInterval(){},fetch:async()=>{throw Error('Preview')},URL,Blob,crypto:require('node:crypto').webcrypto,console};
+vm.createContext(context);vm.runInContext(fs.readFileSync('dist/teams.js','utf8'),context);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),context);const run=s=>vm.runInContext(s,context);
+const game={id:'watch',away:'Texas',home:'Georgia',awayAbbr:'TEX',homeAbbr:'UGA',awayId:251,homeId:61,status:'live',included:true,spread:-3.5,homeScore:24,awayScore:20,quarter:3,clock:'8:42',possessionId:'251',downDistance:'2nd & 4',fieldPosition:'UGA 18',redZone:true,awayTimeouts:2,homeTimeouts:0,lastPlay:'Texas rush for six yards.',venue:'Sanford Stadium',venueLocation:'Athens, GA',kickoff:new Date(Date.now()-3600000).toISOString(),feedCheckedAt:new Date().toISOString()};
+run(`demo=false;saved={watch:'away'};picks={watch:'home'};games=[${JSON.stringify(game)}]`);
+let card=run('gameCard(games[0],true)');assert(card.includes('Q3 · 8:42'));assert(card.includes('TEX ball'));assert(card.includes('2nd &amp; 4'));assert(card.includes('Ball at UGA 18'));assert(card.includes('Red zone'));assert(card.includes('0 timeouts'));assert(card.includes('Last play'));assert(card.includes('Sanford Stadium'));
+assert(card.includes('Trailing now · 0 projected'));assert(!card.includes('Covering now'),'An unsaved pick changed live grading');assert(card.includes('0.5 behind the spread'));
+run('games[0].awayScore=27');card=run('gameCard(games[0],true)');assert(card.includes('Covering now · +1 projected'));assert(card.includes('6.5 ahead of the spread'));
+assert.equal(run("gameStatusLabel({...games[0],statusName:'STATUS_HALFTIME',statusDetail:null})"),'Halftime');assert.equal(run("gameStatusLabel({...games[0],quarter:6,clock:'0:00'})"),'2OT');
+assert.equal(run("gameStatusLabel({...games[0],status:'void',statusName:'STATUS_POSTPONED'})"),'POSTPONED');
+run("games[0].homeScore=null;games[0].status='final'");card=run('gameCard(games[0],true)');assert(card.includes('Awaiting final score'));assert(card.includes('game-pick-summary neutral'));assert(card.includes('>—</span>'));
+run("games[0].status='live';games[0].homeScore=24;games[0].lastPlay='<script>alert(1)</script>'");card=run('gameCard(games[0],true)');assert(card.includes('&lt;script&gt;'));assert(!card.includes('<script>'));
+run("games[0].feedCheckedAt=new Date(Date.now()-300000).toISOString()");assert(run('gameFeedStatus(games[0])').startsWith('Feed delayed'));
+assert.equal(run("possessionSide({...games[0],possessionId:'unknown'})"),null);assert(run("gameSituation({...games[0],possessionId:null,downDistance:null,fieldPosition:null,redZone:false,lastPlay:null})").includes('Play details not available'));
+run("liveBoard={rows:[],activeGames:0};markLiveChanges(liveBoard,[{...games[0],downDistance:'1st & 10'}])");assert.equal(run("changedPlayIds.has('watch')"),true);
+assert(run('liveGamesPanel()').includes('Games moving the board'));
+console.log('Game card checks passed: clock/quarter/OT, possession, down and field position, timeouts, red zone, play text, saved-pick grading, missing scores, escaping and stale data.');

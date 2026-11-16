@@ -148,4 +148,27 @@ class AppTests(unittest.TestCase):
         with patch.dict(os.environ,{'ODDS_API_KEY':'test-only-key'}),patch.object(server,'fetch_json',return_value=[{'id':'event'}]) as fetch:
             self.assertEqual(server.betting_odds(),[{'id':'event'}]);self.assertEqual(server.betting_odds(),[{'id':'event'}]);self.assertEqual(fetch.call_count,1)
 
+    def test_feed_sync_persists_clock_possession_play_and_timeout_details(self):
+        self.game(id='100')
+        teams=[{'homeAway':'home','score':'24','team':{'id':'61','displayName':'Georgia','abbreviation':'UGA','conferenceId':'8'}},{'homeAway':'away','score':'20','team':{'id':'251','displayName':'Texas','abbreviation':'TEX','conferenceId':'8'}}]
+        situation={'possession':'251','shortDownDistanceText':'2nd & 4','possessionText':'UGA 18','isRedZone':True,'homeTimeouts':0,'awayTimeouts':2,'lastPlay':{'id':'play-1','text':'Texas rush for six yards.','scoringPlay':False}}
+        feed={'events':[{'id':'100','date':'2026-11-14T20:30Z','status':{'displayClock':'8:42','period':3,'type':{'completed':False,'state':'in','name':'STATUS_IN_PROGRESS','shortDetail':'8:42 - 3rd'}},'competitions':[{'competitors':teams,'situation':situation,'venue':{'fullName':'Sanford Stadium','address':{'city':'Athens','state':'GA'}},'odds':[{'spread':9,'details':'UGA -9'}]}]}]}
+        with patch.object(server,'fetch_json',return_value=feed),patch.dict(os.environ,{'ODDS_API_KEY':''}):server.sync_feed(2026,12)
+        with server.db() as c:g=server.game_rows(c,2026,12)[0]
+        self.assertEqual(g['status'],'live');self.assertEqual(g['spread'],-3.5);self.assertEqual(g['clock'],'8:42');self.assertEqual(g['quarter'],3)
+        self.assertEqual(g['possessionId'],'251');self.assertEqual(g['fieldPosition'],'UGA 18');self.assertTrue(g['redZone']);self.assertEqual(g['downDistance'],'2nd & 4')
+        self.assertEqual(g['homeTimeouts'],0);self.assertEqual(g['awayTimeouts'],2);self.assertEqual(g['lastPlay'],'Texas rush for six yards.');self.assertEqual(g['venueLocation'],'Athens, GA');self.assertIsNotNone(g['feedCheckedAt'])
+    def test_missing_play_details_and_scores_are_not_invented(self):
+        details=server.feed_game_details({'status':{}},{},{},server.now_iso())
+        for key in ['clock','quarter','possessionId','downDistance','fieldPosition','lastPlay','homeTimeouts']:self.assertIsNone(details[key])
+        self.assertFalse(details['redZone']);self.assertIsNone(server.feed_score(None));self.assertIsNone(server.feed_score('—'));self.assertEqual(server.feed_score('0'),0)
+        self.login();live=self.live_fixture();live['homeScore']=None
+        with server.db() as c:server.put_game(c,live,2026,12)
+        board=self.call('state')[1]['liveStandings'];self.assertEqual(board['incompleteGames'],1);self.assertTrue(board['stale'])
+        self.assertTrue(all(r['livePoints']==0 for r in board['rows']))
+    def test_per_game_freshness_cannot_be_hidden_by_other_feed_updates(self):
+        self.login();live=self.live_fixture();live['feedCheckedAt']=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(minutes=5)).isoformat()
+        with server.db() as c:server.put_game(c,live,2026,12)
+        self.assertTrue(self.call('state')[1]['liveStandings']['stale'])
+
 if __name__=='__main__':unittest.main()

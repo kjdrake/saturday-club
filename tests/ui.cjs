@@ -5,7 +5,7 @@ const store=new Map();const context={document:{querySelector:el,querySelectorAll
 vm.createContext(context);vm.runInContext(fs.readFileSync('dist/teams.js','utf8'),context);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),context);
 const run=s=>vm.runInContext(s,context);
 assert(el('#app').innerHTML.includes('Every pick. Every Saturday.'));
-run("picks['1']='away';render()");assert(el('#app').innerHTML.includes('Texas selected'));
+run("picks['1']='away';render()");assert(el('#app').innerHTML.includes('Unsaved selection'));assert(el('#app').innerHTML.includes('data-pick="1:away"'));
 el('#savePicks').click();assert.equal(JSON.parse(store.get('sc-picks'))['1'],'away');
 for(const [hash,text] of [['scores','Saturday, in motion.'],['standings','The bragging rights board.'],['history','Seasons end. Stories don’t.'],['admin','Behind the Saturday magic.']]){context.location.hash="#"+hash;run('render()');assert(el('#app').innerHTML.includes(text))}
 run('demo=false;user=null;render()');assert(el('#app').innerHTML.includes('Sign in / Join the league'));

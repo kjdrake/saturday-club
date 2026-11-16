@@ -75,15 +75,17 @@ def standings(c,season,include_live=False):
     for row in projections:row['movement']=row['officialRank']-row['rank']
     live_games=[(key,g) for key,g in gs.items() if g.get('included') and g.get('status')=='live']
     stamps=[];missing=False
-    for week in {key[1] for key,g in live_games}:
-        stamp=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
-        if stamp:
-            try:stamps.append(datetime.datetime.fromisoformat(stamp['value'].replace('Z','+00:00')))
+    week_stamps={week:c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone() for week in {key[1] for key,g in live_games}}
+    for key,game in live_games:
+        value=game.get('feedCheckedAt') or (week_stamps[key[1]]['value'] if week_stamps[key[1]] else None)
+        if value:
+            try:stamps.append(datetime.datetime.fromisoformat(value.replace('Z','+00:00')))
             except (ValueError,TypeError):missing=True
         else:missing=True
     oldest=min(stamps) if stamps else None
-    stale=bool(live_games) and (missing or oldest is None or time.time()-oldest.timestamp()>60)
-    return official,{'rows':projections,'activeGames':len(live_games),'updatedAt':oldest.isoformat() if oldest else None,'stale':stale,'scoreRefreshSeconds':SCORE_REFRESH_SECONDS}
+    incomplete=sum(points(game,'home',include_live=True) is None for key,game in live_games)
+    stale=bool(live_games) and (incomplete>0 or missing or oldest is None or time.time()-oldest.timestamp()>60)
+    return official,{'rows':projections,'activeGames':len(live_games),'incompleteGames':incomplete,'updatedAt':oldest.isoformat() if oldest else None,'stale':stale,'scoreRefreshSeconds':SCORE_REFRESH_SECONDS}
 def fetch_json(url):
     with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'SaturdayClub/1.0'}),timeout=15) as r:return json.load(r)
 def betting_odds():
@@ -100,6 +102,40 @@ def betting_odds():
     except Exception:
         if cached:return cached['events']
         raise
+def feed_game_details(event,competition,teams,checked_at):
+    status=event.get('status') or competition.get('status') or {}
+    status_type=status.get('type') or {}
+    situation=competition.get('situation') or {}
+    play=situation.get('lastPlay') or {}
+    venue=competition.get('venue') or {};address=venue.get('address') or {}
+    possession=situation.get('possession')
+    if isinstance(possession,dict):possession=possession.get('id') or (possession.get('team') or {}).get('id')
+    def text(value):return value.strip() if isinstance(value,str) and value.strip() else None
+    quarter=status.get('period')
+    field=text(situation.get('possessionText')) or text(situation.get('fieldPosition'))
+    if not field and situation.get('ballOn') is not None:field=str(situation['ballOn'])
+    networks=[name for broadcast in competition.get('broadcasts',[]) for name in broadcast.get('names',[]) if isinstance(name,str)]
+    if not networks and text(competition.get('broadcast')):networks=[competition['broadcast']]
+    if not networks:networks=[broadcast['media']['shortName'] for broadcast in competition.get('geoBroadcasts',[]) if isinstance(broadcast.get('media'),dict) and text(broadcast['media'].get('shortName'))]
+    result={'network':', '.join(dict.fromkeys(networks)),'clock':text(status.get('displayClock')),'quarter':quarter if isinstance(quarter,int) and not isinstance(quarter,bool) and quarter>0 else None,
+            'statusName':text(status_type.get('name')),'statusDetail':text(status_type.get('shortDetail')) or text(status_type.get('detail')),
+            'possessionId':str(possession) if possession is not None else None,
+            'downDistance':text(situation.get('shortDownDistanceText')) or text(situation.get('downDistanceText')),
+            'fieldPosition':field,'redZone':situation.get('isRedZone') is True or situation.get('redZone') is True,
+            'lastPlay':text(play.get('text')) or text(play.get('shortText')),'lastPlayId':str(play['id']) if play.get('id') is not None else None,
+            'lastPlayScoring':play.get('scoringPlay') is True,'venue':text(venue.get('fullName')) or text(venue.get('name')),
+            'venueLocation':', '.join(filter(None,[text(address.get('city')),text(address.get('state'))])) or None,'feedCheckedAt':checked_at}
+    for side in ('home','away'):
+        timeouts=situation.get(side+'Timeouts',teams.get(side,{}).get('timeouts'))
+        result[side+'Timeouts']=timeouts if isinstance(timeouts,int) and not isinstance(timeouts,bool) and 0<=timeouts<=3 else None
+    return result
+def feed_score(value):
+    if isinstance(value,dict):value=value.get('value',value.get('displayValue'))
+    try:
+        if isinstance(value,bool) or (isinstance(value,float) and not value.is_integer()):return None
+        score=int(value)
+        return score if score>=0 else None
+    except (TypeError,ValueError,OverflowError):return None
 _sync_lock=threading.Lock()
 def sync_feed(season,week):
     if not _sync_lock.acquire(blocking=False):return 'A feed sync is already in progress.'
@@ -108,6 +144,7 @@ def sync_feed(season,week):
             last=c.execute('SELECT value FROM meta WHERE key=?',(f'sync-{season}-{week}',)).fetchone()
             if last and time.time()-float(last['value'])<12:return 'Feed was refreshed less than 12 seconds ago.'
         feed=fetch_json(f'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=100&dates={season}&seasontype=2&week={week}')
+        feed_checked_at=now_iso()
         parsed=[]
         for e in feed.get('events',[]):
             comp=e['competitions'][0];teams={t['homeAway']:t for t in comp['competitors']}
@@ -118,8 +155,9 @@ def sync_feed(season,week):
             if line is not None:
                 line=abs(float(line));line=-line if detail.startswith(teams['home']['team'].get('abbreviation','!')) else line
             g={'id':e['id'],'kickoff':e['date'],'status':status,'period':e['status'].get('type',{}).get('shortDetail',''),'included':False,'spread':line,'bookmaker':odd.get('provider',{}).get('name','ESPN public odds'),'network':', '.join(n for b in comp.get('broadcasts',[]) for n in b.get('names',[]))}
+            g.update(feed_game_details(e,comp,teams,feed_checked_at))
             for side,t in teams.items():
-                g[side+'ConferenceId']=str(t['team'].get('conferenceId',''));g[side+'Conference']=CONFERENCES.get(g[side+'ConferenceId'],'Other / unknown');g[side]=t['team']['displayName'];g[side+'Abbr']=t['team']['abbreviation'];g[side+'Id']=t['team']['id'];g[side+'Score']=int(t.get('score',0));g[side+'Rank']=t.get('curatedRank',{}).get('current');g[side+'Record']=next((r.get('summary','') for r in t.get('records',[]) if r.get('type')=='total'),'')
+                g[side+'ConferenceId']=str(t['team'].get('conferenceId',''));g[side+'Conference']=CONFERENCES.get(g[side+'ConferenceId'],'Other / unknown');g[side]=t['team']['displayName'];g[side+'Abbr']=t['team']['abbreviation'];g[side+'Id']=t['team']['id'];g[side+'Score']=feed_score(t.get('score'));g[side+'Rank']=t.get('curatedRank',{}).get('current');g[side+'Record']=next((r.get('summary','') for r in t.get('records',[]) if r.get('type')=='total'),'')
                 if g[side+'Rank'] and g[side+'Rank']>25:g[side+'Rank']=None
             parsed.append(g)
         warning=''
@@ -141,7 +179,7 @@ def sync_feed(season,week):
                     previous=old[g['id']];g['included']=previous.get('included',False)
                     if g['included'] or locked(previous):g['spread']=previous.get('spread');g['bookmaker']=previous.get('bookmaker','Commissioner')
                 put_game(c,g,season,week)
-            stamp=now_iso();c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',(f'sync-{season}-{week}',str(time.time())));c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',(f'last-{season}-{week}',stamp))
+            stamp=feed_checked_at;c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',(f'sync-{season}-{week}',str(time.time())));c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',(f'last-{season}-{week}',stamp))
         return f'Updated {len(parsed)} games.'+warning
     finally:_sync_lock.release()
 class Problem(Exception):
