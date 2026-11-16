@@ -108,3 +108,9 @@ Each card has a saved-pick panel showing its frozen spread, current cover/traili
 In **Commissioner tools**, choose the game’s week and click **Edit** beside its home spread. Enter the corrected home line (negative for a home favorite), optionally explain the correction, and confirm the impact before updating. This works for published manual games and feed-backed games.
 
 Existing picks remain on the same team and use the corrected spread for scoring. A visible game-card notice shows the old/new line, correction time, and optional reason so players can review or change their selection before kickoff. Corrections record the commissioner’s name and survive feed refreshes. The server rejects edits after kickoff or once a game is live/final, rejects stale editors, and limits this action to commissioners. Ordinary bulk slate updates still cannot silently change a published line.
+
+## Invitation links and social sign-in
+
+Commissioner tools can create a seven-day, single-use invitation link, open a prefilled text, or send an invitation email through SES. Invitation links prefill the registration code. Google and Facebook sign-up remain invitation-only; existing members connect providers from their signed-in profile to keep their account and picks. Provider buttons appear only after configuration. Email/password sign-in remains available.
+
+Follow [account and email setup](docs/account-setup.md) for provider callback URLs, Secrets Manager settings, SES domain verification, and the one-time infrastructure/deployer update required on existing servers. Real provider authorization and email delivery require that setup; deploying code alone does not activate them.

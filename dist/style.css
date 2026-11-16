@@ -67,3 +67,13 @@ nav a.active{color:var(--brand-ivory);background:#514329;border-color:#8c713e66}
 @media(prefers-reduced-motion:reduce){.play-updated{animation:none}}
 
 .slate-line{gap:6px}.slate-line input{flex:1;min-width:0;font-size:12px}.slate-line>.spread-edit-slot{display:inline-flex;flex:0 0 32px;width:32px;height:39px;align-items:center;justify-content:center}.spread-edit{padding:6px 0;border:0;background:none;color:#e4bf77;font-size:10px;text-decoration:underline;cursor:pointer}.spread-edit:focus-visible{outline:2px solid #e4bf77;outline-offset:3px}.spread-warning{background:#46351f;border:1px solid #8f713d;border-radius:6px;padding:12px;font-size:11px;line-height:1.7;color:#f0d9ae;margin:16px 0}.spread-confirm{display:flex;gap:10px;align-items:flex-start;font-size:11px;line-height:1.6;color:#e1d5bd}.spread-confirm input{width:16px;min-width:16px;height:16px;margin:2px 0;accent-color:var(--brand-gold)}.spread-correction-notice{margin:0 17px 14px;padding:12px;border:1px solid #8f713d;border-radius:6px;background:#3b3020;color:#eed6a4}.spread-correction-notice strong{font-size:10px;display:block}.spread-correction-notice>span{display:block;font-size:9px;margin-top:5px}.spread-correction-notice p{margin:6px 0 0;font-size:9px;line-height:1.7;color:#d7c4a2}@media(max-width:480px){.slate-line input{flex:0 1 88px;width:88px}.slate-line>.spread-edit-slot{flex-basis:32px}.slate-line>span:first-child{margin-right:auto}.spread-correction-notice{margin:0 13px 13px}}
+
+/* Invitation-only social sign-in uses the same lounge palette as league controls. */
+.social-caption{font-size:12px;line-height:1.6;margin:18px 0 10px;color:var(--muted,#777)}
+.social-buttons{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.social-button{flex:1;min-width:150px;justify-content:center}
+.social-button:disabled{opacity:.65;cursor:default}
+
+.invitation-share{margin-top:18px;padding-top:14px;border-top:1px solid #c9c2ae}.invitation-share input{font-size:12px}.invitation-share .social-buttons{margin-top:12px}.social-buttons a{text-decoration:none;text-align:center}
+
+.mobile-account{display:none}@media(max-width:880px){.mobile-account{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}}
