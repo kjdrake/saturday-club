@@ -66,3 +66,13 @@ Passwords use salted scrypt, session tokens are stored as SHA-256 hashes, cookie
 python -m unittest discover -s tests -v
 node --check dist/app.js
 ```
+
+## Team logos and appearance
+
+The interface uses a dark green lounge theme with warm brass accents. Weekly game selection uses shared grid columns for matchups, result buttons, and spreads at desktop and mobile widths. Team marks come from ESPN's public team directory/CDN; 142 logos are cached locally in `dist/assets/team-logos/`. The school directory also resolves manually entered names (for example, Texas A&M). Other schools use the CDN, with an abbreviation badge if no logo is available.
+
+To refresh the directory and cache logos for another set of regular-season weeks:
+
+```sh
+python infra/fetch_team_logos.py --season 2026 --weeks 11 12 13
+```
