@@ -171,4 +171,27 @@ class AppTests(unittest.TestCase):
         with server.db() as c:server.put_game(c,live,2026,12)
         self.assertTrue(self.call('state')[1]['liveStandings']['stale'])
 
+    def test_published_spread_correction_preserves_picks_and_history(self):
+        self.login();self.game()
+        self.call('picks',{'season':2026,'week':12,'picks':{'g1':'home'}})
+        body={'season':2026,'week':12,'id':'g1','spread':-6.5,'expectedSpread':-3.5,'confirmed':True,'reason':'Corrected manual entry'}
+        self.assertEqual(self.call('admin/spread',body)[0],200)
+        state=self.call('state')[1];g=state['games'][0]
+        self.assertEqual(g['spread'],-6.5);self.assertEqual(state['picks'],{'g1':'home'})
+        self.assertEqual(g['spreadHistory'][0]['previous'],-3.5);self.assertEqual(g['spreadHistory'][0]['spread'],-6.5);self.assertEqual(g['spreadHistory'][0]['reason'],'Corrected manual entry')
+        self.assertEqual(self.call('admin/spread',{**body,'spread':-7.5})[0],409)
+        self.assertEqual(self.call('admin/spread',{**body,'expectedSpread':-6.5,'spread':-7.5,'confirmed':False})[0],409)
+        self.game(offset=-1)
+        self.assertEqual(self.call('admin/spread',{**body,'expectedSpread':-3.5})[0],409)
+    def test_spread_correction_requires_admin_and_survives_feed_sync(self):
+        self.login();self.game(id='100')
+        body={'season':2026,'week':12,'id':'100','spread':2.5,'expectedSpread':-3.5,'confirmed':True}
+        self.assertEqual(self.call('admin/spread',body)[0],200)
+        team=lambda side,id,name:{'homeAway':side,'score':'0','team':{'id':id,'displayName':name,'abbreviation':name}}
+        feed={'events':[{'id':'100','date':datetime.datetime.fromtimestamp(time.time()+3600,datetime.timezone.utc).isoformat(),'status':{'type':{'completed':False,'state':'pre'}},'competitions':[{'competitors':[team('home','1','Home'),team('away','2','Away')],'odds':[{'spread':9,'details':'Home -9'}]}]}]}
+        with patch.object(server,'fetch_json',return_value=feed),patch.dict(os.environ,{'ODDS_API_KEY':''}):server.sync_feed(2026,12)
+        game=self.call('state')[1]['games'][0];self.assertEqual(game['spread'],2.5);self.assertEqual(len(game['spreadHistory']),1)
+        code=self.call('admin/invite',{'name':'Member'})[1]['code'];self.call('register',{'email':'member-line@example.com','password':'member-test-password','code':code})
+        self.assertEqual(self.call('admin/spread',{**body,'expectedSpread':2.5,'spread':3.5})[0],403)
+
 if __name__=='__main__':unittest.main()
