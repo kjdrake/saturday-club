@@ -77,3 +77,5 @@ nav a.active{color:var(--brand-ivory);background:#514329;border-color:#8c713e66}
 .invitation-share{margin-top:18px;padding-top:14px;border-top:1px solid #c9c2ae}.invitation-share input{font-size:12px}.invitation-share .social-buttons{margin-top:12px}.social-buttons a{text-decoration:none;text-align:center}
 
 .mobile-account{display:none}@media(max-width:880px){.mobile-account{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}}
+
+.password-controls{display:flex;align-items:stretch;gap:8px;margin-top:7px}.password-controls input{width:100%;min-width:0;flex:1}.password-toggle{flex-shrink:0;font-size:11px;padding:9px 12px}.password-field>.field{margin-bottom:0}@media(max-width:400px){.password-toggle{font-size:10px;padding:8px}}
