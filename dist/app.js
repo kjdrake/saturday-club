@@ -32,8 +32,8 @@ function liveStatus(){
   const time=liveBoard.updatedAt?new Date(liveBoard.updatedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'}):null;
   if(refreshFailed)return 'Connection interrupted · Showing the last received scores';
   if(!liveBoard.activeGames)return 'No games in progress · Final season points';
-  if(liveBoard.stale)return `Feed delayed${time?' · Last score update '+time:' · Waiting for a score update'}`;
-  return `${liveBoard.activeGames} game${liveBoard.activeGames===1?'':'s'} live${time?' · Score update '+time:''}`;
+  if(liveBoard.stale)return `Feed delayed${time?' · Last successful check '+time:' · Waiting for a score update'}`;
+  return `${liveBoard.activeGames} game${liveBoard.activeGames===1?'':'s'} live${time?' · Feed checked '+time:''}`;
 }
 function movementLabel(row){
   if(leaderboardMode!=='live'||!row.movement)return '<span class="rank-steady" aria-label="No change from final rank">—</span>';
