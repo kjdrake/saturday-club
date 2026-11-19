@@ -103,6 +103,12 @@ Game cards now show larger live scores and the feed’s current quarter/clock, i
 Each card has a saved-pick panel showing its frozen spread, current cover/trailing/push status, projected points, and margin against the spread. Final games show settled results instead. Missing scores display a dash and await a valid score rather than inventing zero. Per-game feed-check times identify delayed cards, and an incomplete live score flags the leaderboard’s projections as incomplete. The standings page also includes **Games moving the board**, with cards for in-progress games in the selected week’s published slate.
 
 
+## Scoring indicators
+
+While the page is open, a newly received score change adds a 30-second **Score update** banner with the team and point change, a brief gold card glow, and a highlight on the scoring team. The banner survives unchanged polls and expires independently of polling; screen readers receive each update once. Reduced-motion settings disable the glow. The same indicator appears on weekly picks, the scoreboard, and live-game cards under standings.
+
+Explicit feed-reported scoring plays receive a **Scoring play** banner even if the score totals have not arrived yet, and the latest scoring-play description is highlighted. Score decreases are labeled **Score correction** rather than celebrated. Initial loads, week/season/account changes, missing-score recovery, and a final-status change alone do not create score-change notices. Notices describe when an update was received, not the exact time a play occurred; normal polling/provider delays still apply. A point delta can include multiple plays between feed updates, so it is not interpreted as a touchdown or field goal without play data.
+
 ## Correct a published spread before kickoff
 
 In **Commissioner tools**, choose the game’s week and click **Edit** beside its home spread. Enter the corrected home line (negative for a home favorite), optionally explain the correction, and confirm the impact before updating. This works for published manual games and feed-backed games.
