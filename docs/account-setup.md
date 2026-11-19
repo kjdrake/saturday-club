@@ -50,7 +50,7 @@ Authorized redirect URI, exactly:
 https://4thandsoul.com/api/oauth/google/callback
 ```
 
-The integration requests only `openid email`, using the authorization-code flow with PKCE. Add the client ID/secret to the runtime secret. While in testing, add your friends as test users; publish the app for broader use and complete any verification Google requests. Privacy policy: `https://4thandsoul.com/privacy.html`.
+The integration requests only `openid email`, using the authorization-code flow with PKCE. In the runtime secret, save Google’s **Client ID** under the exact key `GOOGLE_CLIENT_ID` and Google’s **Client secret** under `GOOGLE_CLIENT_SECRET`. Do not use `Client ID` or `Client Secret` as the AWS key names. While in testing, add your friends as test users; publish the app for broader use and complete any verification Google requests. Privacy policy: `https://4thandsoul.com/privacy.html`.
 
 ## Facebook
 
@@ -77,3 +77,16 @@ An email-send error cancels that invitation, leaving no active unconfirmed link.
 ## Password reset emails
 
 The same SES identity, instance-role permission and runtime settings send password-reset email. No new AWS credentials or sender setup is required. After deployment, test **Sign in → Forgot password?** with an address you control, then open the email and choose a new password. Links expire after 30 minutes, work once, and revoke existing sessions on success. The request response is intentionally identical for unknown, disabled and active accounts; it does not guarantee inbox delivery. In the SES sandbox the recipient still must be verified. See [security operations](security.md) for details and operator recovery.
+
+## Public branding links and Google logo upload
+
+Use these exact URLs in Google Auth Platform → Branding:
+
+| Field | Value |
+| --- | --- |
+| Application home page | `https://4thandsoul.com` |
+| Application privacy policy | `https://4thandsoul.com/privacy.html` |
+| Application terms of service | `https://4thandsoul.com/terms.html` |
+| Authorized domain | `4thandsoul.com` |
+
+For **App logo**, download [the 120 × 120 PNG](https://4thandsoul.com/assets/brand/saturday-club-google-logo.png) and upload that file. It is an export of the existing Saturday Club icon, below Google’s 1 MB limit. A [512 × 512 PNG](https://4thandsoul.com/assets/brand/saturday-club-logo-512.png) is also available. Publishing or updating your branding may require Google’s brand verification. The terms and privacy pages are public and do not require a league login.
