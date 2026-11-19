@@ -13,6 +13,7 @@ let demo=!serverBacked, user=serverBacked?null:{id:'jd',name:'Jamie Davis',role:
 let pendingInviteCode='',passwordResetToken='';
 let liveBoard={rows:[],activeGames:0,updatedAt:null,stale:false};
 let leaderboardMode='live',changedStandingIds=new Set(),changedScoreIds=new Set(),changedPlayIds=new Set();
+const scoringEvents=new Map(),SCORING_NOTICE_MS=30000;let scoringNoticeTimer;
 let stateRequestId=0,stateInFlight=false,pendingMutations=0,loadedPeriod=null,refreshFailed=false;
 function mergeDraftPicks(local,baseline,server,receivedGames){
   const byId=new Map(receivedGames.map(game=>[game.id,game])),merged={};
@@ -23,10 +24,54 @@ function mergeDraftPicks(local,baseline,server,receivedGames){
   }
   return merged;
 }
+function clearScoringEvents(){scoringEvents.clear();clearTimeout(scoringNoticeTimer);const announcements=$('#scoreAnnouncements');if(announcements)announcements.textContent=''}
+function activeScoringEvent(id){const event=scoringEvents.get(id);return event&&event.expiresAt>Date.now()?event:null}
+function expireScoringEvents(){
+  for(const[id,event]of scoringEvents)if(event.expiresAt<=Date.now())scoringEvents.delete(id);
+  document.querySelectorAll('[data-score-event]').forEach(element=>{
+    if(!activeScoringEvent(element.dataset.scoreEvent)){
+      const card=element.closest('.game');element.remove();card?.classList.remove('has-score-event','scoring-flash');
+      card?.querySelectorAll('.team-just-scored').forEach(team=>team.classList.remove('team-just-scored'));
+    }
+  });
+  scheduleScoringExpiry();
+}
+function scheduleScoringExpiry(){
+  clearTimeout(scoringNoticeTimer);if(!scoringEvents.size)return;
+  const next=Math.min(...[...scoringEvents.values()].map(event=>event.expiresAt));
+  scoringNoticeTimer=setTimeout(expireScoringEvents,Math.max(0,next-Date.now())+25);
+}
+function markScoringEvents(previousGames,nextGames){
+  const announcements=[],now=Date.now();
+  for(const[id,event]of scoringEvents)if(event.expiresAt<=now||!nextGames.some(game=>game.id===id))scoringEvents.delete(id);
+  for(const game of nextGames){
+    const old=previousGames.get(game.id);
+    if(!old||!['live','scheduled'].includes(old.status)||!['live','final'].includes(game.status))continue;
+    if(game.status==='final'&&old.status!=='live')continue;
+    const known=['away','home'].every(side=>Number.isInteger(old[side+'Score'])&&Number.isInteger(game[side+'Score']));
+    const deltas=Object.fromEntries(['away','home'].map(side=>[side,known?game[side+'Score']-old[side+'Score']:0]));
+    const changed=known&&Object.values(deltas).some(delta=>delta!==0);
+    const newPlay=game.lastPlayScoring===true&&game.lastPlay&&((game.lastPlayId&&game.lastPlayId!==old.lastPlayId)||game.lastPlay!==old.lastPlay);
+    if(!changed&&!newPlay)continue;
+    const correction=changed&&Object.values(deltas).some(delta=>delta<0);
+    const kind=correction?'correction':changed?'score':'play';
+    const summary=changed?['away','home'].filter(side=>deltas[side]!==0).map(side=>`${game[side]} ${signed(deltas[side])}`).join(' · '):game.lastPlay;
+    const label=correction?'Score correction':changed?'Score update':'Scoring play';
+    scoringEvents.set(game.id,{kind,deltas,summary,label,receivedAt:now,expiresAt:now+SCORING_NOTICE_MS});
+    announcements.push(`${game.away} at ${game.home}. ${label}: ${summary}. Score ${game.awayScore??'unavailable'} to ${game.homeScore??'unavailable'}.`);
+  }
+  if(announcements.length){const region=$('#scoreAnnouncements');if(region)region.textContent=announcements.join(' ')}
+  scheduleScoringExpiry();
+}
+function scoringNotice(game){
+  const event=activeScoringEvent(game.id);if(!event)return '';
+  return `<div class="scoring-notice ${event.kind==='correction'?'score-correction':''}" data-score-event="${esc(game.id)}"><span class="scoring-notice-icon" aria-hidden="true">${event.kind==='correction'?'↺':'↑'}</span><div><strong>${esc(event.label)}</strong><span>${esc(event.summary)}</span></div><small>Received ${esc(new Date(event.receivedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'}))}</small></div>`;
+}
 function markLiveChanges(nextBoard,nextGames){
   const previous=new Map(liveBoard.rows.map(row=>[row.id,row]));
   changedStandingIds=new Set(nextBoard.rows.filter(row=>previous.has(row.id)&&(previous.get(row.id).projectedPoints!==row.projectedPoints||previous.get(row.id).rank!==row.rank)).map(row=>row.id));
   const previousGames=new Map(games.map(game=>[game.id,game]));
+  markScoringEvents(previousGames,nextGames);
   changedPlayIds=new Set(nextGames.filter(game=>{const old=previousGames.get(game.id);return old&&['possessionId','downDistance','fieldPosition','lastPlayId','lastPlay'].some(key=>old[key]!==game[key])}).map(game=>game.id));
   changedScoreIds=new Set(nextGames.filter(game=>{const old=previousGames.get(game.id);return old&&(old.homeScore!==game.homeScore||old.awayScore!==game.awayScore||old.status!==game.status)}).map(game=>game.id));
 }
@@ -88,7 +133,8 @@ async function load({requireUser=false,background=false}={}){
     if(requestId!==stateRequestId||period!==`${season}:${week}`)return;
     if(requireUser&&!d.user)throw Error('Your sign-in could not be confirmed. Please allow cookies for this site and try again.');
     const nextBoard=d.liveStandings||{rows:[],activeGames:0,updatedAt:null,stale:false};
-    markLiveChanges(nextBoard,d.games);
+    const sameLeagueState=loadedPeriod===period&&user?.id===d.user?.id;
+    if(sameLeagueState)markLiveChanges(nextBoard,d.games);else{clearScoringEvents();changedStandingIds=new Set();changedScoreIds=new Set();changedPlayIds=new Set()}
     if(loadedPeriod===period&&user?.id===d.user?.id)lockedDraftChanges=d.games.filter(game=>locked(game)&&picks[game.id]!==saved[game.id]&&picks[game.id]!==d.picks[game.id]).length;
     const nextPicks=loadedPeriod===period&&user?.id===d.user?.id?mergeDraftPicks(picks,saved,d.picks,d.games):d.picks;
     demo=false;user=d.user;games=d.games;picks=nextPicks;saved={...d.picks};members=d.members||[];standings=d.standings;liveBoard=nextBoard;lastSync=d.lastSync;loadedPeriod=period;refreshFailed=false;
@@ -98,7 +144,7 @@ async function load({requireUser=false,background=false}={}){
   }catch(error){
     if(requestId!==stateRequestId)return;
     if(requireUser){if(error.status===401)throw Error('Your sign-in could not be confirmed. Please allow cookies for this site and try again.');throw error}
-    if(error.status===401){demo=false;user=null;games=[];picks={};saved={};members=[];standings=[];liveBoard={rows:[],activeGames:0,updatedAt:null,stale:false};loadedPeriod=null;refreshFailed=false;$('#connection').textContent='● SIGN IN TO PLAY';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}
+    if(error.status===401){clearScoringEvents();demo=false;user=null;games=[];picks={};saved={};members=[];standings=[];liveBoard={rows:[],activeGames:0,updatedAt:null,stale:false};loadedPeriod=null;refreshFailed=false;$('#connection').textContent='● SIGN IN TO PLAY';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}
     else if(!demo){refreshFailed=true;changedStandingIds=new Set();changedScoreIds=new Set();changedPlayIds=new Set();$('#connection').textContent='● RECONNECTING';if(!background)toast('Could not refresh. Showing last received data.')}
   }finally{if(requestId===stateRequestId)stateInFlight=false}
   if(background&&view==='admin'){refreshLiveRegions();return}
@@ -217,7 +263,7 @@ function gameSituation(game){
   const side=possessionSide(game),field=game.fieldPosition;
   const down=game.downDistance,showField=field&&(!down||!down.toLowerCase().includes(field.toLowerCase()));
   const available=side||down||field||game.redZone;
-  return `<div class="game-situation ${changedPlayIds.has(game.id)?'play-updated':''}">${game.redZone?'<span class="red-zone-tag">Red zone</span>':''}${side?`<span class="possession-info"><span aria-hidden="true">●</span> ${esc(game[side+'Abbr']||game[side])} ball</span>`:''}${down?`<strong>${esc(down)}</strong>`:''}${showField?`<span>Ball at ${esc(field)}</span>`:''}${!available?'<span class="play-unavailable">Play details not available</span>':''}</div>${game.lastPlay?`<div class="game-last-play"><span>${game.lastPlayScoring?'Scoring play':'Last play'}</span><p>${esc(game.lastPlay)}</p></div>`:''}`;
+  return `<div class="game-situation ${changedPlayIds.has(game.id)?'play-updated':''}">${game.redZone?'<span class="red-zone-tag">Red zone</span>':''}${side?`<span class="possession-info"><span aria-hidden="true">●</span> ${esc(game[side+'Abbr']||game[side])} ball</span>`:''}${down?`<strong>${esc(down)}</strong>`:''}${showField?`<span>Ball at ${esc(field)}</span>`:''}${!available?'<span class="play-unavailable">Play details not available</span>':''}</div>${game.lastPlay?`<div class="game-last-play ${game.lastPlayScoring?'is-scoring-play':''}"><span>${game.lastPlayScoring?'Scoring play':'Last play'}</span><p>${esc(game.lastPlay)}</p></div>`:''}`;
 }
 function gamePickSummary(game){
   const side=locked(game)?saved[game.id]:picks[game.id];
@@ -239,8 +285,9 @@ function gamePickSummary(game){
 }
 function gameCard(g,scoreMode=false){
   const selected=picks[g.id],sp=[-g.spread,g.spread],possession=possessionSide(g);
-  const location=[g.venue,g.venueLocation].filter(Boolean).join(' · ');
-  return `<article class="game ${g.status==='live'?'is-live ':''}${changedScoreIds.has(g.id)?'score-updated':''}" data-game-id="${g.id}"><div class="game-meta"><span class="${g.status==='live'?'live':''}">${esc(gameStatusLabel(g))}</span><span>${esc(g.network||'NCAA')}${locked(g)?' · 🔒':''}</span></div><div class="game-body">${['away','home'].map((side,index)=>`${index?'<span class="versus">AT</span>':''}<div class="team ${index?'right':''} ${possession===side?'has-possession':''}">${teamBadge(g,side)}<div class="team-text"><b>${isRanked(g[side+'Rank'])?`<sup>${g[side+'Rank']}</sup> `:''}${esc(g[side])}</b><small>${esc(g[side+'Record']||'FBS')}${scoreMode&&g.spread!==null?' · '+signed(sp[index]):''}</small>${possession===side?'<span class="possession-marker">● Possession</span>':''}${g.status==='live'&&Number.isInteger(g[side+'Timeouts'])?`<small class="team-timeouts">${g[side+'Timeouts']} timeouts</small>`:''}</div>${['live','final'].includes(g.status)?`<span class="score" aria-label="${esc(g[side])} score">${g[side+'Score']??'—'}</span>`:''}</div>`).join('')}</div>${gameSituation(g)}${!scoreMode?`<div class="pick-row">${['away','home'].map((side,index)=>`<button class="pick ${selected===side?'selected':''}" data-pick="${g.id}:${side}" ${locked(g)||g.spread===null?'disabled':''}><span><i class="circle">${selected===side?'✓':''}</i>${esc(g[side+'Abbr']||g[side])}</span><b>${g.spread===null?'No line':signed(sp[index])}</b></button>`).join('')}</div>`:''}${gamePickSummary(g)}${spreadCorrectionNotice(g)}${location?`<div class="game-location">${esc(location)}</div>`:''}<div class="game-note"><span>${esc(gameFeedStatus(g))}</span><span>${g.spread===null?'Awaiting spread':esc(g.bookmaker||'Commissioner')+' · '+(locked(g)?'Locked line':'Published line')}</span></div></article>`;
+  const location=[g.venue,g.venueLocation].filter(Boolean).join(' · '),event=activeScoringEvent(g.id);
+  const scoreClass=event?`has-score-event ${event.kind!=='correction'&&Date.now()-event.receivedAt<4000?'scoring-flash':''}`:changedScoreIds.has(g.id)?'score-updated':'';
+  return `<article class="game ${g.status==='live'?'is-live ':''}${scoreClass}" data-game-id="${esc(g.id)}"><div class="game-meta"><span class="${g.status==='live'?'live':''}">${esc(gameStatusLabel(g))}</span><span>${esc(g.network||'NCAA')}${locked(g)?' · 🔒':''}</span></div>${scoringNotice(g)}<div class="game-body">${['away','home'].map((side,index)=>`${index?'<span class="versus">AT</span>':''}<div class="team ${index?'right':''} ${possession===side?'has-possession':''} ${event&&event.kind!=='correction'&&event.deltas[side]>0?'team-just-scored':''}">${teamBadge(g,side)}<div class="team-text"><b>${isRanked(g[side+'Rank'])?`<sup>${g[side+'Rank']}</sup> `:''}${esc(g[side])}</b><small>${esc(g[side+'Record']||'FBS')}${scoreMode&&g.spread!==null?' · '+signed(sp[index]):''}</small>${possession===side?'<span class="possession-marker">● Possession</span>':''}${g.status==='live'&&Number.isInteger(g[side+'Timeouts'])?`<small class="team-timeouts">${g[side+'Timeouts']} timeouts</small>`:''}</div>${['live','final'].includes(g.status)?`<span class="score" aria-label="${esc(g[side])} score">${g[side+'Score']??'—'}</span>`:''}</div>`).join('')}</div>${gameSituation(g)}${!scoreMode?`<div class="pick-row">${['away','home'].map((side,index)=>`<button class="pick ${selected===side?'selected':''}" data-pick="${g.id}:${side}" ${locked(g)||g.spread===null?'disabled':''}><span><i class="circle">${selected===side?'✓':''}</i>${esc(g[side+'Abbr']||g[side])}</span><b>${g.spread===null?'No line':signed(sp[index])}</b></button>`).join('')}</div>`:''}${gamePickSummary(g)}${spreadCorrectionNotice(g)}${location?`<div class="game-location">${esc(location)}</div>`:''}<div class="game-note"><span>${esc(gameFeedStatus(g))}</span><span>${g.spread===null?'Awaiting spread':esc(g.bookmaker||'Commissioner')+' · '+(locked(g)?'Locked line':'Published line')}</span></div></article>`;
 }
 
 function livePickLabel(game,side){if(game.spread===null||game.homeScore==null||game.awayScore==null)return 'Awaiting live score';const margin=game.homeScore+game.spread-game.awayScore;return margin===0?'Pushing now · +0.5 projected':(side==='home'?margin>0:margin<0)?'Covering now · +1 projected':'Trailing now · 0 projected'}
