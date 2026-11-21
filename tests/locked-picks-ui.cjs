@@ -1,0 +1,15 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const elements=new Map(),events=new Map();const el=s=>{if(!elements.has(s))elements.set(s,{innerHTML:'',textContent:'',style:{},addEventListener(){},showModal(){},close(){}});return elements.get(s)};
+const context={document:{querySelector:el,querySelectorAll:()=>[],addEventListener(type,handler){events.set(type,handler)}},localStorage:{getItem:()=>null},location:{hash:'#scores'},window:{},AbortController,setTimeout:()=>1,clearTimeout(){},setInterval(){},fetch:async()=>{throw Error('Fixture')},URL,Blob,console};
+vm.createContext(context);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),context);const run=code=>vm.runInContext(code,context);
+const game={id:'g',home:'Georgia',away:'Texas',homeAbbr:'UGA',awayAbbr:'TEX',spread:-3.5,status:'scheduled',included:true,kickoff:new Date(Date.now()+3600000).toISOString()};
+run(`demo=false;user={id:'me'};lockedPicks={g:{home:[{id:'other',name:'Other <script>'}],away:[{id:'me',name:'My name'}],none:[{id:'skip',name:'Skipped'}]}};games=[${JSON.stringify(game)}]`);
+let panel=run('leaguePicksPanel(games[0])');assert(panel.includes('private until kickoff'));assert(!panel.includes('Other'));assert(!panel.includes('Who picked whom'));
+run("games[0].status='live'");panel=run('leaguePicksPanel(games[0])');assert(panel.includes('Who picked whom'));assert(panel.includes('2 picks · 1 no pick'));assert(panel.includes('Other &lt;script&gt;'));assert(!panel.includes('<script>'));assert(panel.includes('My name'));assert(panel.includes('>You</b>'));assert(panel.includes('No saved pick'));assert(panel.includes('+3.5'));assert(panel.includes('-3.5'));
+assert(run('gameCard(games[0],true)').includes('Who picked whom'));assert(run('gameCard(games[0],false)').includes('Who picked whom'));
+const target={matches:selector=>selector==='details.league-picks',dataset:{leaguePicks:'g'},open:true};events.get('toggle')({target});assert(run('leaguePicksPanel(games[0])').includes(' open>'));
+target.open=false;events.get('toggle')({target});assert(!run('leaguePicksPanel(games[0])').includes(' open>'));
+run('lockedPicks={}');assert(run('leaguePicksPanel(games[0])').includes('refresh automatically'));assert(!run('leaguePicksPanel(games[0])').includes('0 picks'));
+run("lockedPicks={g:{away:[],home:[],none:[{id:'me',name:'My name'}]}}");panel=run('leaguePicksPanel(games[0])');assert(panel.includes('0 picks'));assert(panel.includes('No players'));assert(panel.includes('No saved pick'));
+run('games[0].included=false');assert.equal(run('leaguePicksPanel(games[0])'),'');
+console.log('Locked-pick UI checks passed: pregame privacy, team/spread/name groups, no-pick state, self marker, escaping, both card modes, persistent disclosure state and delayed payload.');

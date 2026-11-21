@@ -124,3 +124,11 @@ Follow [account and email setup](docs/account-setup.md) for provider callback UR
 ## Password recovery and member security
 
 Sign in → **Forgot password?** emails a 30-minute, single-use recovery link when SES is configured. No account is created, the response does not disclose membership, and a successful reset revokes all sessions and outstanding recovery links while preserving picks and roles. See [security and recovery operations](docs/security.md) for setup, limitations, and operator recovery. The public [privacy and security page](https://4thandsoul.com/privacy.html) explains implemented controls without claiming a security certification.
+
+## Who picked whom
+
+Each published game card has an expandable **Who picked whom** section once the game locks. It groups saved picks under each team and its published spread, marks your own name, and lists members with no saved pick. The section keeps its open state during live refreshes and appears on picks, scoreboard and standings game cards. Existing historical/disabled members remain represented, matching season standings.
+
+The server—not the browser clock—controls disclosure. State includes only names and IDs grouped by saved side for published games at/past a known kickoff, or confirmed live/final games. Upcoming picks, unpublished games, future canceled games and games with unknown start times are excluded. Every request is restricted to the selected season/week and requires an active signed-in account. A card can briefly show a waiting message between its local kickoff lock and the next server refresh. No game’s upcoming picks or team counts are revealed early, including to commissioners through this feature.
+
+Phone navigation reserves its own space below the page and accounts for device safe-area insets. All five navigation targets have visible text labels and full-height tap areas; save/error toasts appear above the bar.
