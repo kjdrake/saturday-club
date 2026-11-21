@@ -94,3 +94,26 @@ nav a.active{color:var(--brand-ivory);background:#514329;border-color:#8c713e66}
 @keyframes scoring-card-glow{0%,30%{box-shadow:0 0 0 2px #e8bc64,0 0 24px #c79b4660}100%{box-shadow:none}}
 @media(max-width:650px){.scoring-notice{padding:11px 13px;gap:8px}.scoring-notice>div>span{font-size:11px}.scoring-notice>small{max-width:65px;font-size:7px}}
 @media(prefers-reduced-motion:reduce){.game.scoring-flash{animation:none}}
+
+/* League picks are disclosed by the server only after a published game locks. */
+.league-picks{margin:0 17px 14px;border:1px solid #625337;border-radius:7px;background:#242119;overflow:hidden}
+.league-picks summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px;cursor:pointer;list-style:none;font-size:11px;font-weight:600;color:#ead3a3}
+.league-picks summary::-webkit-details-marker{display:none}.league-picks summary:after{content:'＋';font-size:15px;flex-shrink:0}.league-picks[open] summary:after{content:'−'}.league-picks summary>small{font-size:9px;color:#bfb094;font-weight:400;margin-left:auto}.league-picks summary:focus-visible{outline:2px solid #d2af64;outline-offset:-3px}
+.league-pick-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 13px 12px}.league-pick-group{min-width:0}.league-pick-group h4{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:0 0 8px;font-size:11px;line-height:1.6;color:#f0dfbd}.league-pick-group h4>small{font-size:10px;font-weight:400;color:#d3bc89}.league-pick-group h4>span{margin-left:auto;border-radius:10px;padding:1px 7px;background:#4b402a;font-size:9px;color:#e6cd97}
+.league-pick-group ul{list-style:none;padding:0;margin:0;display:grid;gap:5px}.league-pick-group li{display:flex;align-items:center;gap:6px;border-radius:4px;padding:7px 8px;font-size:10px;line-height:1.5;background:#302b20;color:#ddd2be;overflow-wrap:anywhere}.league-pick-group li>span{min-width:0;flex:1}.league-pick-group li>b{font-size:8px;flex-shrink:0;color:#e5c37b;text-transform:uppercase}.league-pick-group .your-league-pick{border:1px solid #95783d;background:#44371f}.league-pick-group li.no-league-picks{background:transparent;color:#a99e88;font-style:italic}.no-pick-group{margin:0 13px 12px;padding-top:11px;border-top:1px solid #4f4533}.no-pick-group ul{grid-template-columns:repeat(2,minmax(0,1fr))}.league-picks-note{margin:0;padding:0 13px 13px;color:#b6a88e;font-size:9px;line-height:1.6}.league-picks-private{margin:0 17px 14px;font-size:9px;line-height:1.7;color:#b9ac92}
+@media(max-width:650px){.league-picks,.league-picks-private{margin-left:13px;margin-right:13px}.league-pick-columns{gap:9px}.league-picks summary{font-size:10px}.league-picks summary>small{font-size:8px}.league-pick-group li{padding:6px;font-size:9px}}
+
+/* Keep phone navigation above OS controls and reserve its space in the page. */
+@media(max-width:580px){
+  :root{--mobile-nav-height:72px;--mobile-safe-bottom:env(safe-area-inset-bottom,0px)}
+  html{scroll-padding-bottom:calc(var(--mobile-nav-height) + var(--mobile-safe-bottom) + 12px)}
+  body{padding-bottom:calc(var(--mobile-nav-height) + var(--mobile-safe-bottom))}
+  aside{inset:auto 0 0;height:calc(var(--mobile-nav-height) + var(--mobile-safe-bottom));width:100%;padding:0 0 var(--mobile-safe-bottom);border-right:0;border-top:1px solid #625337;display:block;z-index:5}
+  aside nav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));height:100%;margin:0;padding:4px max(8px,env(safe-area-inset-right,0px)) 4px max(8px,env(safe-area-inset-left,0px));gap:4px;align-items:stretch}
+  aside nav a,aside nav a:last-child{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:52px;padding:5px 2px;margin:0;font-size:20px;line-height:1;border:1px solid transparent}
+  aside nav a.active{border-color:#8d7444}
+  aside nav a span{display:block;flex:0 0 auto;font-size:8px;line-height:1.2;text-align:center;max-width:100%}
+  aside nav b,aside nav i,aside .nav-separator{display:none}
+  footer{padding-bottom:24px}
+  #toast{bottom:calc(var(--mobile-nav-height) + var(--mobile-safe-bottom) + 12px);max-width:calc(100vw - 32px);transform:translateX(-50%)}
+}

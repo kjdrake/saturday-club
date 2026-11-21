@@ -35,6 +35,7 @@ jobs:
           node tests/live-ui.cjs
           node tests/game-cards-ui.cjs
           node tests/scoring-ui.cjs
+          node tests/locked-picks-ui.cjs
           python -m py_compile server.py social_auth.py invitations.py password_reset.py sync.py ops/backup.py infra/account_services.py
           for script in infra/*.sh; do bash -n "$script"; done
           python -m unittest discover -s infra/tests -v

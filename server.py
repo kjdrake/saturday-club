@@ -38,7 +38,9 @@ def initialize():
             c.execute('INSERT INTO users VALUES(?,?,?,?,?,1)',(secrets.token_hex(12),os.getenv('ADMIN_NAME','Commissioner'),email.lower(),pw_hash(password),'admin'))
 def now_iso():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def kickoff(g):
-    try:return datetime.datetime.fromisoformat(g['kickoff'].replace('Z','+00:00')).timestamp()
+    value=g.get('kickoff')
+    if not isinstance(value,str):return 0
+    try:return datetime.datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
     except (KeyError,ValueError,TypeError):return 0
 def locked(g):return g.get('status')!='scheduled' or kickoff(g)<=time.time()
 def game_rows(c,season,week=None):
@@ -46,6 +48,23 @@ def game_rows(c,season,week=None):
     else:rows=c.execute('SELECT data FROM games WHERE season=? AND week=?',(season,week))
     return [json.loads(r['data']) for r in rows]
 def put_game(c,g,season,week):c.execute('INSERT OR REPLACE INTO games VALUES(?,?,?,?)',(g['id'],season,week,json.dumps(g)))
+def revealed_game_picks(c,games,season,week,at=None):
+    # Disclose only published games that have actually reached their lock time.
+    # A canceled future game or a missing kickoff must not reveal upcoming picks.
+    at=time.time() if at is None else at
+    eligible={g['id'] for g in games if g.get('included') and (g.get('status') in ('live','final') or 0<kickoff(g)<=at)}
+    if not eligible:return {}
+    roster=sorted([dict(row) for row in c.execute('SELECT id,name FROM users')],key=lambda row:(row['name'].casefold(),row['id']))
+    selected={gid:{} for gid in eligible}
+    for row in c.execute('SELECT game_id,user_id,side FROM picks WHERE season=? AND week=?',(season,week)):
+        if row['game_id'] in eligible and row['side'] in ('away','home'):selected[row['game_id']][row['user_id']]=row['side']
+    result={}
+    for gid in eligible:
+        groups={'away':[],'home':[],'none':[]}
+        for member in roster:groups[selected[gid].get(member['id'],'none')].append(member)
+        result[gid]=groups
+    return result
+
 def points(g,side,include_live=False):
     statuses=('final','live') if include_live else ('final',)
     if g.get('status') not in statuses or g.get('spread') is None or not g.get('included'):return None
@@ -307,7 +326,7 @@ def application(environ,start_response):
                     else:state_games=[g for g in state_games if g.get('included')]
                     last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
                     official,live_board=standings(c,season,include_live=True)
-                    result={'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    result={'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
                 elif route=='picks' and method=='POST':
                     season,week=period(data);submitted=data.get('picks',{})
                     if not isinstance(submitted,dict):raise Problem('Invalid picks')
