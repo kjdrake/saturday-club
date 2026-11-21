@@ -117,3 +117,5 @@ nav a.active{color:var(--brand-ivory);background:#514329;border-color:#8c713e66}
   footer{padding-bottom:24px}
   #toast{bottom:calc(var(--mobile-nav-height) + var(--mobile-safe-bottom) + 12px);max-width:calc(100vw - 32px);transform:translateX(-50%)}
 }
+
+.profile-edit{margin-top:16px;padding:15px;border:1px solid #625337;border-radius:7px;background:#242119}.profile-edit[hidden]{display:none}.profile-edit .form-actions{flex-wrap:wrap}.profile-edit input{min-width:0}#profileStatus:empty{display:none}
