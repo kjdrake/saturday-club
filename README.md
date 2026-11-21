@@ -132,3 +132,7 @@ Each published game card has an expandable **Who picked whom** section once the 
 The server—not the browser clock—controls disclosure. State includes only names and IDs grouped by saved side for published games at/past a known kickoff, or confirmed live/final games. Upcoming picks, unpublished games, future canceled games and games with unknown start times are excluded. Every request is restricted to the selected season/week and requires an active signed-in account. A card can briefly show a waiting message between its local kickoff lock and the next server refresh. No game’s upcoming picks or team counts are revealed early, including to commissioners through this feature.
 
 Phone navigation reserves its own space below the page and accounts for device safe-area insets. All five navigation targets have visible text labels and full-height tap areas; save/error toasts appear above the bar.
+
+## Edit your display name
+
+Open your account (bottom-left profile on desktop or the account icon in the phone header), choose **Edit name**, enter your display name or nickname, and select **Save name**. Names must contain 1–80 visible characters; extra spaces are normalized. This updates current and historical standings and revealed pick lists because those records stay attached to the same account ID. It does not change your email/password, provider connection, role or picks. Previously recorded commissioner correction names remain as audit history. Only the signed-in user’s own name can be updated.

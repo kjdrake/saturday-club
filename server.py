@@ -327,6 +327,15 @@ def application(environ,start_response):
                     last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
                     official,live_board=standings(c,season,include_live=True)
                     result={'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                elif route=='profile' and method=='POST':
+                    raw=data.get('name')
+                    if not isinstance(raw,str) or any(ord(char)<32 or ord(char)==127 for char in raw):raise Problem('Enter a display name using normal text.')
+                    name=' '.join(raw.split())
+                    try:name.encode('utf-8')
+                    except UnicodeEncodeError:raise Problem('Enter a valid display name.')
+                    if not 1<=len(name)<=80 or not any(char.isprintable() and not char.isspace() for char in name):raise Problem('Your display name must be 1 to 80 visible characters.')
+                    c.execute('UPDATE users SET name=? WHERE id=?',(name,user['id']))
+                    result={'ok':True,'user':{'id':user['id'],'name':name,'role':user['role']}}
                 elif route=='picks' and method=='POST':
                     season,week=period(data);submitted=data.get('picks',{})
                     if not isinstance(submitted,dict):raise Problem('Invalid picks')

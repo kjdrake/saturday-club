@@ -105,5 +105,19 @@ const submit=h=>h.form.submit({preventDefault(){}});
     h.setHandler(async()=>response(400,{error:'This reset link is invalid, expired, or already used.'}));await form.submit({preventDefault(){}});
     assert.equal(h.el('#resetError').hidden,false);assert.match(h.el('#resetError').textContent,/expired/);assert.equal(h.el('#saveNewPassword').disabled,false);
   }
+  {
+    const h=await ready(),profile=h.el('#profileForm');profile.elements={name:{value:'New nickname',focus(){}}};
+    h.run("user={id:'admin',name:'Old name',role:'admin'};accountModal()");h.calls.length=0;h.el('#editName').onclick();assert.equal(profile.hidden,false);
+    let finish;h.setHandler(url=>url==='/api/profile'?new Promise(resolve=>finish=resolve):Promise.resolve(response(200,{...state,user:{...state.user,name:'New nickname'}})));
+    const pending=profile.submit({preventDefault(){}});await profile.submit({preventDefault(){}});assert.equal(h.calls.length,1);assert.equal(h.el('#saveName').disabled,true);
+    assert.deepEqual(JSON.parse(h.calls[0].options.body),{name:'New nickname'});finish(response(200,{ok:true,user:{...state.user,name:'New nickname'}}));await pending;
+    assert.equal(profile.hidden,true);assert.equal(h.el('#profileHeading').textContent,'New nickname');assert.equal(h.el('#profileStatus').textContent,'Your name is updated.');assert(h.el('#profileName').innerHTML.includes('New nickname'));
+    h.el('#editName').onclick();profile.elements.name.value='  ';h.setHandler(async()=>response(400,{error:'Your display name must be 1 to 80 characters.'}));await profile.submit({preventDefault(){}});
+    assert.equal(h.el('#profileError').hidden,false);assert.match(h.el('#profileError').textContent,/display name/);assert.equal(h.el('#saveName').disabled,false);
+    h.el('#cancelName').onclick();assert.equal(profile.hidden,true);assert.equal(profile.elements.name.value,'New nickname');
+  }
+  {
+    const h=await ready();h.run("standings=[{id:'a',name:'=1+1',points:0,wins:0,losses:0,pushes:0,rank:1}];leaderboardMode='final'");assert.match(h.run('standingsCsv()'),/"'=1\+1"/);
+  }
   console.log('Sign-in regression checks passed: visible errors, pending state, duplicate prevention, success, cookie failure, network failure, timeout, invalid response, and registration.');
 })().catch(error=>{console.error(error);process.exitCode=1});

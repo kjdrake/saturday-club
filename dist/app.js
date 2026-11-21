@@ -98,7 +98,8 @@ function standingsPanel(){
 function standingsCsv(){
   const live=leaderboardMode==='live',rows=rankRows();
   return [live?'Rank,Name,Final points,Live points,Projected points':'Rank,Name,Wins,Losses,Pushes,Final points',...rows.map((row,index)=>{
-    const name='"'+row.name.replace(/"/g,'""')+'"',rank=row.rank||rows.findIndex(other=>other.points===row.points)+1;
+    const safeName=/^[=+@\-\t\r\n]/.test(row.name.trimStart())?"'"+row.name:row.name;
+    const name='"'+safeName.replace(/"/g,'""')+'"',rank=row.rank||rows.findIndex(other=>other.points===row.points)+1;
     return live?`${rank},${name},${row.finalPoints??row.points},${row.livePoints||0},${row.points}`:`${rank},${name},${row.wins},${row.losses},${row.pushes},${row.points}`;
   })].join('\n');
 }
@@ -485,7 +486,20 @@ function resetPasswordModal(){
 }
 function accountModal(){
   if(user&&!demo){
-    modal(`<h2>${esc(user.name)}</h2><p>You’re signed in as a ${esc(user.role)}.</p><p class="form-status"><a href="/privacy.html" target="_blank" rel="noopener">Privacy &amp; security</a> · <a href="/terms.html" target="_blank" rel="noopener">Terms of service</a></p><div id="socialOptions"></div><div id="socialError" class="form-error" role="alert" tabindex="-1" hidden></div><button class="button" id="logout">Sign out</button>`);
+    modal(`<h2 id="profileHeading">${esc(user.name)}</h2><p>You’re signed in as a ${esc(user.role)}.</p><button type="button" class="button" id="editName">Edit name</button><form id="profileForm" class="profile-edit" hidden><label class="field">Display name<input name="name" autocomplete="nickname" maxlength="80" value="${esc(user.name)}" required aria-describedby="profileHelp"></label><p id="profileHelp" class="form-status">This is the name your friends see in standings and pick lists. You can use a nickname.</p><div id="profileError" class="form-error" role="alert" tabindex="-1" hidden></div><div class="form-actions"><button type="submit" class="button primary" id="saveName">Save name</button><button type="button" class="button" id="cancelName">Cancel</button></div></form><p id="profileStatus" class="form-status" role="status" aria-live="polite"></p><p class="form-status"><a href="/privacy.html" target="_blank" rel="noopener">Privacy &amp; security</a> · <a href="/terms.html" target="_blank" rel="noopener">Terms of service</a></p><div id="socialOptions"></div><div id="socialError" class="form-error" role="alert" tabindex="-1" hidden></div><button class="button" id="logout">Sign out</button>`);
+    const profile=$('#profileForm');let savingName=false;
+    $('#editName').onclick=()=>{profile.hidden=false;$('#editName').hidden=true;$('#profileStatus').textContent='';profile.elements.name.focus()};
+    $('#cancelName').onclick=()=>{if(savingName)return;profile.hidden=true;$('#editName').hidden=false;profile.elements.name.value=user.name;$('#profileError').hidden=true};
+    profile.addEventListener('submit',async event=>{
+      event.preventDefault();if(savingName)return;savingName=true;let nameSaved=false;
+      const button=$('#saveName'),error=$('#profileError');button.disabled=true;$('#cancelName').disabled=true;button.textContent='Saving…';error.hidden=true;profile.setAttribute('aria-busy','true');
+      try{
+        const result=await api('profile',{name:profile.elements.name.value},{timeoutMs:15000});nameSaved=true;
+        user={...user,name:result.user.name};await load({requireUser:true});
+        $('#profileHeading').textContent=user.name;profile.elements.name.value=user.name;profile.hidden=true;$('#editName').hidden=false;$('#profileStatus').textContent='Your name is updated.';
+      }catch(failure){error.textContent=nameSaved?'Your name was saved, but the league could not refresh. Refresh the page to see the update.':failure.message;error.hidden=false;error.focus()}
+      finally{savingName=false;button.disabled=false;$('#cancelName').disabled=false;button.textContent='Save name';profile.removeAttribute('aria-busy')}
+    });
     if(!demo)socialControls();
     $('#logout').onclick=async()=>{await api('logout',{});$('#modal').close();await load()};return;
   }
