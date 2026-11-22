@@ -66,6 +66,8 @@ try:
     friend = client(base)
     friend('register', {'email': 'friend@example.com', 'password': password, 'code': invitation})
     friend('picks', {'season': 2026, 'week': 12, 'picks': {game['id']: 'home'}})
+    friend('profile/notifications', {'slateEmails': False})
+    assert docker('exec', name, 'python', '-c', "from pathlib import Path; import notifications; assert Path('/app/notify.py').is_file(); print('Notification worker packaged')") == 'Notification worker packaged'
     try:
         friend('admin/invite', {'name': 'Forbidden'})
         raise AssertionError('Member obtained commissioner privileges')
@@ -78,6 +80,7 @@ try:
     friend = client(base)
     friend('login', {'email': 'friend@example.com', 'password': password})
     assert friend('state')['picks'][game['id']] == 'home', 'Container replacement lost picks'
+    assert friend('state')['user']['slateEmails'] is False, 'Container replacement lost email preference'
     print('Container smoke test passed: login, invites, roles, picks, backup, replacement persistence.')
 except Exception:
     subprocess.run(['docker', 'logs', name], check=False)

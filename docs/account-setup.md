@@ -90,3 +90,7 @@ Use these exact URLs in Google Auth Platform → Branding:
 | Authorized domain | `4thandsoul.com` |
 
 For **App logo**, download [the 120 × 120 PNG](https://4thandsoul.com/assets/brand/saturday-club-google-logo.png) and upload that file. It is an export of the existing Saturday Club icon, below Google’s 1 MB limit. A [512 × 512 PNG](https://4thandsoul.com/assets/brand/saturday-club-logo-512.png) is also available. Publishing or updating your branding may require Google’s brand verification. The terms and privacy pages are public and do not require a league login.
+
+## Weekly slate notifications
+
+The same SES identity, sender and instance-role permission also send commissioner-triggered slate publication notices. After deployment, publish a future slate with **Email members when I publish this slate** checked, or use **Preview / email published slate** for an existing slate. Start with a controlled test league/address if you do not want to notify real members yet. All active members with slate emails enabled are eligible, including the commissioner; members can change this preference in their account menu. Status counts distinguish email-service acceptance from confirmed inbox delivery. The worker process runs inside the existing score-worker container, with its own email loop, and requires no additional CloudFormation change beyond the previously documented SES setup.

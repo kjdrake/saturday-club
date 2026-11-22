@@ -5,6 +5,7 @@ from http.cookies import SimpleCookie
 import social_auth
 import invitations
 import password_reset
+import notifications
 BASE=Path(__file__).parent
 SCORE_REFRESH_SECONDS=15
 DB=os.getenv('DATABASE_PATH',str(BASE/'data'/'club.db'))
@@ -31,7 +32,7 @@ def pw_hash(password,salt=None):
 def verify(password,hashed):return hmac.compare_digest(pw_hash(password,hashed.split(':')[0]),hashed)
 def initialize():
     with db() as c:
-        c.executescript(SCHEMA + social_auth.SCHEMA + password_reset.SCHEMA)
+        c.executescript(SCHEMA + social_auth.SCHEMA + password_reset.SCHEMA + notifications.SCHEMA)
         email=os.getenv('ADMIN_EMAIL');password=os.getenv('ADMIN_PASSWORD')
         if not c.execute('SELECT 1 FROM users LIMIT 1').fetchone() and email and password:
             if len(password)<12:raise ValueError('ADMIN_PASSWORD must be at least 12 characters')
@@ -326,7 +327,12 @@ def application(environ,start_response):
                     else:state_games=[g for g in state_games if g.get('included')]
                     last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
                     official,live_board=standings(c,season,include_live=True)
-                    result={'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{k:user[k] for k in ('id','name','role')},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    result={'slatePublication':notifications.publication(c,season,week),'notificationAdmin':notifications.admin_state(c,state_games,season,week,kickoff) if user['role']=='admin' else None,'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{**{k:user[k] for k in ('id','name','role')},'slateEmails':notifications.opted_in(c,user['id'])},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                elif route=='profile/notifications' and method=='POST':
+                    enabled=data.get('slateEmails')
+                    if not isinstance(enabled,bool):raise Problem('Choose whether to receive slate emails.')
+                    c.execute('INSERT OR REPLACE INTO notification_preferences VALUES(?,?)',(user['id'],int(enabled)))
+                    result={'ok':True,'slateEmails':enabled}
                 elif route=='profile' and method=='POST':
                     raw=data.get('name')
                     if not isinstance(raw,str) or any(ord(char)<32 or ord(char)==127 for char in raw):raise Problem('Enter a display name using normal text.')
@@ -405,6 +411,15 @@ def application(environ,start_response):
                         g.update(status=data['status'],homeScore=data['homeScore'],awayScore=data['awayScore']);put_game(c,g,season,week);result={'ok':True}
                     elif route=='admin/game':
                         season,week=period(data);g=data['game'];validate_game(g);g.update(id=secrets.token_hex(12),included=False,status='scheduled');put_game(c,g,season,week);result={'ok':True}
+                    elif route=='admin/slate/notify':
+                        season,week=period(data);c.execute('BEGIN IMMEDIATE');current_games=game_rows(c,season,week)
+                        if data.get('expectedRevision')!=notifications.revision(current_games):raise Problem('The published slate changed. Refresh and review it before emailing members.',409)
+                        limit('slate-email-'+user['id'])
+                        try:
+                            if data.get('retryFailed') is True:campaign=notifications.retry(c,season,week,notifications.revision(current_games))
+                            else:campaign=notifications.queue(c,current_games,season,week,user['id'],kickoff)
+                        except ValueError as error:raise Problem(str(error),409)
+                        result={'ok':True,'campaign':campaign}
                     elif route=='admin/slate':
                         season,week=period(data);c.execute('BEGIN IMMEDIATE');old={g['id']:g for g in game_rows(c,season,week)}
                         for item in data.get('games',[]):
@@ -419,7 +434,12 @@ def application(environ,start_response):
                             if item.get('included') and g.get('spread') is None:raise Problem('Select a spread before including a game')
                             if not item.get('included') and g.get('included') and c.execute('SELECT 1 FROM picks WHERE game_id=? AND season=? AND week=?',(g['id'],season,week)).fetchone():raise Problem('Cannot remove a game after members have picked it',409)
                             g['included']=bool(item.get('included'));put_game(c,g,season,week)
+                        published=game_rows(c,season,week);notifications.publish(c,published,season,week)
                         result={'ok':True}
+                        if data.get('notifyMembers') is True:
+                            try:result['campaign']=notifications.queue(c,published,season,week,user['id'],kickoff)
+                            except ValueError as error:result['notificationWarning']=str(error)
+
                     else:raise Problem('Not found',404)
                 else:raise Problem('Not found',404)
         content=json.dumps(result).encode();status='200 OK'

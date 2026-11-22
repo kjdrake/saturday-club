@@ -1,0 +1,28 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const elements=new Map(),storage=new Map(),calls=[];const el=s=>{if(!elements.has(s))elements.set(s,{innerHTML:'',textContent:'',style:{},value:'',hidden:false,disabled:false,addEventListener(type,fn){this[type]=fn},setAttribute(){},removeAttribute(){},showModal(){this.open=true},close(){this.open=false},focus(){},querySelectorAll:()=>[]});return elements.get(s)};
+let handler=async()=>({ok:false,status:401,json:async()=>({error:'Sign in required'})});
+const location={href:'https://4thandsoul.com/?season=2027&week=3#picks',search:'?season=2027&week=3',hash:'#picks'};
+const context={document:{documentElement:{dataset:{serverBacked:'true'}},querySelector:el,querySelectorAll:()=>[]},location,window:{history:{replaceState(_s,_t,path){const u=new URL(path,location.href);Object.assign(location,{href:u.href,search:u.search,hash:u.hash})}}},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},localStorage:{getItem:()=>null},AbortController,setTimeout:()=>1,clearTimeout(){},setInterval(){},URL,Blob,console,fetch:async(url,options)=>{if(url==='/api/auth/providers')return response(200,{providers:[]});calls.push({url,options});return handler(url,options)}};
+const response=(status,data)=>({ok:status>=200&&status<300,status,json:async()=>JSON.parse(JSON.stringify(data))});
+vm.createContext(context);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),context);const run=code=>vm.runInContext(code,context);
+const game={id:'g',away:'Away',home:'Home',spread:-3.5,status:'scheduled',included:true,kickoff:new Date(Date.now()+3600000).toISOString()};
+let state={user:{id:'me',name:'Me',role:'member',slateEmails:true},games:[game],picks:{},standings:[],members:[],seasons:[2027],slatePublication:{revision:'R'},notificationAdmin:null};
+(async()=>{
+ await new Promise(setImmediate);assert.equal(run('season'),2027);assert.equal(run('week'),3);assert(calls[0].url.includes('season=2027&week=3'));assert.deepEqual(JSON.parse(storage.get('sc-return-week')),{season:2027,week:3});
+ handler=async()=>response(200,state);await run('load()');assert(el('#app').innerHTML.includes('Selecting a team alone does not save it'));assert(el('#app').innerHTML.includes('Only saved picks count'));
+ run("picks.g='away';render()");assert.match(run('picksSaveMessage()'),/Unsaved changes/);
+ calls.length=0;let finish;handler=url=>url==='/api/picks'?new Promise(resolve=>finish=resolve):Promise.resolve(response(200,state));
+ const pending=el('#savePicks').click();await el('#savePicks').click();assert.equal(calls.length,1);assert.equal(run('savingPicks'),true);
+ run("picks.g='home';render()");finish(response(200,{ok:true}));await pending;assert.equal(run('saved.g'),'away');assert.equal(run('picks.g'),'home');assert.match(run('picksSaveMessage()'),/Unsaved/);
+ handler=async()=>response(200,{ok:true});await el('#savePicks').click();assert.match(run('picksSaveMessage()'),/All picks saved/);
+ run("user.role='admin';location.hash='#admin';notificationAdmin={emailReady:true,recipientCount:2,currentRevision:'R',upcomingCount:1,campaign:null};slateDraft=null;render();previewSlateEmail()");
+ assert(el('#modalBody').innerHTML.includes('Selecting a team alone does not save it'));assert(el('#modalBody').innerHTML.includes('Skipped games earn 0'));
+ calls.length=0;state={...state,user:{...state.user,role:'admin'},notificationAdmin:{emailReady:true,recipientCount:2,currentRevision:'R',upcomingCount:1,campaign:{pending:2,sending:0,sent:0,failed:0,skipped:0,retryable:0}}};
+ handler=async url=>response(200,url==='/api/admin/slate/notify'?{ok:true}:state);await el('#confirmSlateEmail').onclick({target:el('#confirmSlateEmail')});
+ assert.equal(calls[0].url,'/api/admin/slate/notify');assert.deepEqual(JSON.parse(calls[0].options.body),{season:2027,week:3,expectedRevision:'R',retryFailed:false});assert.equal(el('#modal').open,false);assert.match(run('emailCampaignStatus()'),/2 queued/);
+ run('accountModal()');el('#slateEmailsEnabled').checked=false;calls.length=0;handler=async()=>response(200,{ok:true,slateEmails:false});await el('#emailPreferences').submit({preventDefault(){}});
+ assert.equal(calls[0].url,'/api/profile/notifications');assert.deepEqual(JSON.parse(calls[0].options.body),{slateEmails:false});assert.equal(run('user.slateEmails'),false);
+ location.href='https://4thandsoul.com/?auth_success=1';run('season=2026;week=12;readWeekLink()');assert.equal(run('season'),2027);assert.equal(run('week'),3);
+ run('week=4;rememberWeekLink()');assert.equal(new URL(location.href).searchParams.get('week'),'4');
+ console.log('Notification UI checks passed: week deep links/OAuth return, explicit pick/save guidance, pending/unsaved edits, duplicate save prevention, preview/queue request, status counts and self-service email preferences.');
+})().catch(error=>{console.error(error);process.exitCode=1});
