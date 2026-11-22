@@ -1,12 +1,14 @@
 """Durable, commissioner-triggered slate emails; recipients never share an email."""
 import hashlib
 import json
+import re
 import secrets
 import time
 import invitations
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS notification_preferences(user_id TEXT PRIMARY KEY,slate_emails INTEGER NOT NULL CHECK(slate_emails IN (0,1)));
+CREATE TABLE IF NOT EXISTS text_preferences(user_id TEXT PRIMARY KEY,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),phone TEXT NOT NULL,updated REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS slate_publications(season INTEGER NOT NULL,week INTEGER NOT NULL,revision TEXT NOT NULL,published REAL NOT NULL,PRIMARY KEY(season,week));
 CREATE TABLE IF NOT EXISTS slate_notices(id TEXT PRIMARY KEY,season INTEGER NOT NULL,week INTEGER NOT NULL,revision TEXT NOT NULL,created REAL NOT NULL,created_by TEXT NOT NULL,game_count INTEGER NOT NULL,UNIQUE(season,week,revision));
 CREATE TABLE IF NOT EXISTS slate_deliveries(notice_id TEXT NOT NULL,user_id TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,updated REAL NOT NULL,PRIMARY KEY(notice_id,user_id));
@@ -16,6 +18,19 @@ CREATE INDEX IF NOT EXISTS slate_delivery_status ON slate_deliveries(status,upda
 def opted_in(c, uid):
     row=c.execute('SELECT slate_emails FROM notification_preferences WHERE user_id=?',(uid,)).fetchone()
     return row is None or bool(row['slate_emails'])
+
+def text_preference(c,uid):
+    row=c.execute('SELECT enabled,phone FROM text_preferences WHERE user_id=?',(uid,)).fetchone()
+    return {'slateTexts':bool(row['enabled']),'phone':row['phone']} if row else {'slateTexts':False,'phone':''}
+
+def valid_phone(value):
+    if not isinstance(value,str) or len(value)>40:raise ValueError('Enter a phone number with country code, such as +1 555 123 4567.')
+    phone=re.sub(r'[ ()-]','',value.strip())
+    if phone and not re.fullmatch(r'\+[1-9][0-9]{7,14}',phone):raise ValueError('Enter a phone number with country code, such as +1 555 123 4567.')
+    return phone
+
+def text_recipients(c):
+    return [dict(row) for row in c.execute('SELECT u.id,u.name,p.phone FROM users u JOIN text_preferences p ON p.user_id=u.id WHERE u.active=1 AND p.enabled=1') if row['phone']]
 
 def revision(games):
     snapshot=sorted([(g['id'],g.get('spread'),g.get('kickoff')) for g in games if g.get('included')],key=lambda g:g[0])
@@ -41,7 +56,7 @@ def publication(c,season,week):
 
 def admin_state(c,games,season,week,kickoff):
     current=revision(games)
-    return {'emailReady':invitations.ready(),'recipientCount':len(recipients(c)),'currentRevision':current,'upcomingCount':len(upcoming(games,kickoff)),'campaign':summary(c,season,week,current)}
+    return {'emailReady':invitations.ready(),'textRecipientCount':len(text_recipients(c)),'recipientCount':len(recipients(c)),'currentRevision':current,'upcomingCount':len(upcoming(games,kickoff)),'campaign':summary(c,season,week,current)}
 
 def queue(c,games,season,week,actor,kickoff):
     if not invitations.ready():raise ValueError('Email is not configured. The slate can still be published without email.')
@@ -78,7 +93,7 @@ def email_text(notice,name):
             "4. Look for All picks saved, then return anytime to check your saved selections.\n\n"
             "You may skip games; skipped games earn 0 points. Each game locks at its own kickoff. "
             "Game times are shown in your local time on the site. You can change and save a pick again before that game locks.\n\n"
-            "To turn off slate emails, open your account menu on the site and change Email preferences.\n\n"
+            "To turn off slate emails, open your account menu on the site and change Notification preferences.\n\n"
             "Saturday Club by 4th & Soul — just for fun. No money on the line.")
 
 def process_one(database):
