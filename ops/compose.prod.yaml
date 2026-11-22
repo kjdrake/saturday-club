@@ -31,6 +31,7 @@ services:
     env_file: /opt/saturday-club/runtime.env
     environment:
       DATABASE_PATH: /data/club.db
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     volumes:
       - /srv/saturday-club/league:/data
     depends_on:
