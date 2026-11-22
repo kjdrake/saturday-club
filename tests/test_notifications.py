@@ -113,3 +113,42 @@ class NotificationTests(unittest.TestCase):
             self.assertFalse(notifications.process_one(server.db));send.assert_not_called()
             self.assertEqual(self.settings()['campaign']['failed'],1)
             self.notify(retry=True);self.assertTrue(notifications.process_one(server.db));self.assertEqual(send.call_count,1)
+
+    def test_independent_text_preferences_validation_and_privacy(self):
+        self.login()
+        self.assertEqual(self.call('state')[1]['user']['slateTexts'],False)
+        for payload in [dict(slateEmails=True,slateTexts=True,phone=''),dict(slateEmails=False,slateTexts=True,phone='5551234567'),dict(slateEmails=True,slateTexts='yes',phone='+15551234567')]:
+            self.assertEqual(self.call('profile/notifications',payload)[0],400)
+        self.assertTrue(self.call('state')[1]['user']['slateEmails'])
+        status,result=self.call('profile/notifications',dict(slateEmails=False,slateTexts=True,phone='+1 (555) 123-4567',id='other'))
+        self.assertEqual(status,200);self.assertEqual(result['phone'],'+15551234567')
+        self.assertFalse(result['slateEmails']);self.assertTrue(result['slateTexts'])
+        state=self.call('state')[1];self.assertEqual(state['user']['phone'],'+15551234567')
+        self.assertNotIn('phone',state['members'][0]);self.assertEqual(state['notificationAdmin']['textRecipientCount'],1)
+        # Legacy email-only saves preserve independent text consent and number.
+        self.call('profile/notifications',dict(slateEmails=True))
+        self.assertTrue(self.call('state')[1]['user']['slateTexts'])
+        self.call('profile/notifications',dict(slateEmails=True,slateTexts=False,phone=''))
+        self.assertEqual(self.call('state')[1]['user']['phone'],'')
+        with server.db() as c:self.assertEqual(notifications.text_recipients(c),[])
+
+    def test_manual_texts_recheck_consent_and_require_admin_upcoming_published_slate(self):
+        self.login();self.future_game();self.publish(notify=False)
+        self.call('profile/notifications',dict(slateEmails=False,slateTexts=True,phone='+15551234567'))
+        uid=self.call('state')[1]['user']['id']
+        payload=dict(season=2026,week=12,expectedRevision=self.settings()['currentRevision'])
+        status,result=self.call('admin/slate/text',payload)
+        self.assertEqual(status,200);self.assertEqual(result['recipients'][0]['id'],uid);self.assertNotIn('phone',result['recipients'][0])
+        with self.configured():
+            status,result=self.call('admin/slate/text',dict(payload,recipientId=uid))
+            self.assertEqual(status,200);self.assertTrue(result['smsUrl'].startswith('sms:+15551234567?body='))
+            message=server.urllib.parse.unquote(result['smsUrl']);self.assertIn('week=12#picks',message);self.assertIn('Save picks',message)
+        self.assertEqual(self.call('admin/slate/text',dict(payload,expectedRevision='old'))[0],409)
+        self.call('profile/notifications',dict(slateEmails=False,slateTexts=False))
+        self.assertEqual(self.call('admin/slate/text',dict(payload,recipientId=uid))[0],409)
+        self.assertEqual(self.call('admin/slate/text',payload)[1]['recipients'],[])
+        self.call('profile/notifications',dict(slateEmails=False,slateTexts=True))
+        with server.db() as c:c.execute("UPDATE users SET role='member' WHERE id=?",(uid,))
+        self.assertEqual(self.call('admin/slate/text',payload)[0],403)
+        state=self.call('state')[1];self.assertIsNone(state['notificationAdmin'])
+        self.call('logout',{});self.assertEqual(self.call('admin/slate/text',payload)[0],401)

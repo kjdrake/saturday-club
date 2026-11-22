@@ -327,12 +327,19 @@ def application(environ,start_response):
                     else:state_games=[g for g in state_games if g.get('included')]
                     last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
                     official,live_board=standings(c,season,include_live=True)
-                    result={'slatePublication':notifications.publication(c,season,week),'notificationAdmin':notifications.admin_state(c,state_games,season,week,kickoff) if user['role']=='admin' else None,'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{**{k:user[k] for k in ('id','name','role')},'slateEmails':notifications.opted_in(c,user['id'])},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    result={'slatePublication':notifications.publication(c,season,week),'notificationAdmin':notifications.admin_state(c,state_games,season,week,kickoff) if user['role']=='admin' else None,'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{**{k:user[k] for k in ('id','name','role')},'slateEmails':notifications.opted_in(c,user['id']),**notifications.text_preference(c,user['id'])},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
                 elif route=='profile/notifications' and method=='POST':
                     enabled=data.get('slateEmails')
                     if not isinstance(enabled,bool):raise Problem('Choose whether to receive slate emails.')
+                    current=notifications.text_preference(c,user['id'])
+                    texts=data.get('slateTexts',current['slateTexts'])
+                    if not isinstance(texts,bool):raise Problem('Choose whether to receive slate texts.')
+                    try:phone=notifications.valid_phone(data.get('phone',current['phone']))
+                    except ValueError as error:raise Problem(str(error))
+                    if texts and not phone:raise Problem('Add your mobile number to opt in to texts.')
                     c.execute('INSERT OR REPLACE INTO notification_preferences VALUES(?,?)',(user['id'],int(enabled)))
-                    result={'ok':True,'slateEmails':enabled}
+                    c.execute('INSERT OR REPLACE INTO text_preferences VALUES(?,?,?,?)',(user['id'],int(texts),phone,time.time()))
+                    result={'ok':True,'slateEmails':enabled,'slateTexts':texts,'phone':phone}
                 elif route=='profile' and method=='POST':
                     raw=data.get('name')
                     if not isinstance(raw,str) or any(ord(char)<32 or ord(char)==127 for char in raw):raise Problem('Enter a display name using normal text.')
@@ -411,6 +418,20 @@ def application(environ,start_response):
                         g.update(status=data['status'],homeScore=data['homeScore'],awayScore=data['awayScore']);put_game(c,g,season,week);result={'ok':True}
                     elif route=='admin/game':
                         season,week=period(data);g=data['game'];validate_game(g);g.update(id=secrets.token_hex(12),included=False,status='scheduled');put_game(c,g,season,week);result={'ok':True}
+                    elif route=='admin/slate/text':
+                        season,week=period(data);current_games=game_rows(c,season,week)
+                        if data.get('expectedRevision')!=notifications.revision(current_games):raise Problem('The published slate changed. Refresh and review it before texting members.',409)
+                        if not notifications.upcoming(current_games,kickoff):raise Problem('Publish a slate with upcoming games before texting members.',409)
+                        recipients=notifications.text_recipients(c)
+                        if 'recipientId' in data:
+                            recipient=next((r for r in recipients if r['id']==data['recipientId']),None)
+                            if not recipient:raise Problem('This member is no longer available for text reminders.',409)
+                            base=invitations.public_url()
+                            if not base:raise Problem('The site URL is not configured. Ask the site operator to set APP_URL.',503)
+                            link=f"{base}/?season={season}&week={week}#picks"
+                            message=f"Saturday Club: Week {week} picks are ready! {link} Sign in, choose teams, then tap Save picks. Look for All picks saved. Each game locks at kickoff. To opt out of future reminders, turn off texts in Account > Notification preferences."
+                            result={'smsUrl':'sms:'+recipient['phone']+'?body='+urllib.parse.quote(message,safe='')}
+                        else:result={'recipients':[{'id':r['id'],'name':r['name']} for r in recipients]}
                     elif route=='admin/slate/notify':
                         season,week=period(data);c.execute('BEGIN IMMEDIATE');current_games=game_rows(c,season,week)
                         if data.get('expectedRevision')!=notifications.revision(current_games):raise Problem('The published slate changed. Refresh and review it before emailing members.',409)
