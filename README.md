@@ -155,3 +155,8 @@ Commissioner tools show **queued**, **accepted by email service**, **failed** an
 Members can independently enable email and text slate reminders in **Account → Notification preferences**. Email retains its existing default (on); texts default off and require an explicit opt-in plus a mobile number with country code. Members can disable either channel or remove their number. These preferences do not suppress invitation or password-reset emails.
 
 For texts, publish the slate, then select **Prepare text reminders** in commissioner tools. Only active members who opted in appear. Select **Text [name]** to open a private prefilled reminder in your phone’s messaging app and send it there. Consent and slate eligibility are checked again when preparing each message. Texts are not sent automatically on publication, have no server delivery tracking, and require a device with a messaging app. Avoid repeated sends; the app cannot detect whether a manually prepared message was sent. Opting out cannot recall messages already prepared in a commissioner’s phone.
+
+
+### Avoiding unsaved picks
+
+The **Save picks** bar stays fixed above mobile navigation from the first selection and follows unsaved changes across league tabs. It explicitly distinguishes selected teams from saved picks and keeps failed saves visible. Switching weeks or seasons, or signing out with changes, offers **Save picks & continue**, **Keep picking**, or **Discard changes**. Continuing after a save requires server success; failures retain the draft. Browser refresh/close uses the browser’s unsaved-changes warning where supported (mobile app termination cannot be intercepted reliably). Picks still require an explicit save before kickoff; drafts do not count toward standings.
