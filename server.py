@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS invites(code TEXT PRIMARY KEY,name TEXT NOT NULL,expires REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS games(id TEXT NOT NULL,season INTEGER NOT NULL,week INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(id,season,week));
 CREATE TABLE IF NOT EXISTS picks(user_id TEXT NOT NULL,game_id TEXT NOT NULL,season INTEGER NOT NULL,week INTEGER NOT NULL,side TEXT NOT NULL,PRIMARY KEY(user_id,game_id,season,week));
+CREATE TABLE IF NOT EXISTS pick_submissions(user_id TEXT NOT NULL,season INTEGER NOT NULL,week INTEGER NOT NULL,saved_at REAL NOT NULL,PRIMARY KEY(user_id,season,week));
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT);
 '''
 def db():
@@ -38,6 +39,17 @@ def initialize():
             if len(password)<12:raise ValueError('ADMIN_PASSWORD must be at least 12 characters')
             c.execute('INSERT INTO users VALUES(?,?,?,?,?,1)',(secrets.token_hex(12),os.getenv('ADMIN_NAME','Commissioner'),email.lower(),pw_hash(password),'admin'))
 def now_iso():return datetime.datetime.now(datetime.timezone.utc).isoformat()
+def weekly_pick_status(c,games,season,week):
+    published=[g for g in games if g.get('included') and g.get('status')!='void']
+    ids={g['id'] for g in published}
+    counts={}
+    for row in c.execute('SELECT user_id,game_id FROM picks WHERE season=? AND week=?',(season,week)):
+        if row['game_id'] in ids:counts[row['user_id']]=counts.get(row['user_id'],0)+1
+    saves={row['user_id']:row['saved_at'] for row in c.execute('SELECT user_id,saved_at FROM pick_submissions WHERE season=? AND week=?',(season,week))}
+    members=[{'id':row['id'],'name':row['name'],'savedCount':counts.get(row['id'],0),'lastSavedAt':saves.get(row['id'])} for row in c.execute('SELECT id,name FROM users WHERE active=1 ORDER BY name COLLATE NOCASE,id')]
+    starts=[kickoff(g) for g in published if kickoff(g)>0]
+    return {'season':season,'week':week,'gameCount':len(published),'firstKickoff':min(starts) if starts else None,'firstGameStarted':any(locked(g) for g in published),'members':members}
+
 def kickoff(g):
     value=g.get('kickoff')
     if not isinstance(value,str):return 0
@@ -327,7 +339,7 @@ def application(environ,start_response):
                     else:state_games=[g for g in state_games if g.get('included')]
                     last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
                     official,live_board=standings(c,season,include_live=True)
-                    result={'slatePublication':notifications.publication(c,season,week),'notificationAdmin':notifications.admin_state(c,state_games,season,week,kickoff) if user['role']=='admin' else None,'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{**{k:user[k] for k in ('id','name','role')},'slateEmails':notifications.opted_in(c,user['id']),**notifications.text_preference(c,user['id'])},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    result={'pickSubmissions':weekly_pick_status(c,state_games,season,week) if user['role']=='admin' else None,'slatePublication':notifications.publication(c,season,week),'notificationAdmin':notifications.admin_state(c,state_games,season,week,kickoff) if user['role']=='admin' else None,'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{**{k:user[k] for k in ('id','name','role')},'slateEmails':notifications.opted_in(c,user['id']),**notifications.text_preference(c,user['id'])},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
                 elif route=='profile/notifications' and method=='POST':
                     enabled=data.get('slateEmails')
                     if not isinstance(enabled,bool):raise Problem('Choose whether to receive slate emails.')
@@ -365,6 +377,7 @@ def application(environ,start_response):
                         if side in ('home','away'):c.execute('INSERT OR REPLACE INTO picks VALUES(?,?,?,?,?)',(user['id'],g['id'],season,week,side))
                         elif side is None:c.execute('DELETE FROM picks WHERE user_id=? AND game_id=? AND season=? AND week=?',(user['id'],g['id'],season,week))
                         else:raise Problem('Invalid pick side')
+                    c.execute('INSERT OR REPLACE INTO pick_submissions VALUES(?,?,?,?)',(user['id'],season,week,time.time()))
                     result={'ok':True}
                 elif route.startswith('admin/') and method=='POST':
                     if user['role']!='admin':raise Problem('Admin access required',403)
