@@ -160,3 +160,8 @@ For texts, publish the slate, then select **Prepare text reminders** in commissi
 ### Avoiding unsaved picks
 
 The **Save picks** bar stays fixed above mobile navigation from the first selection and follows unsaved changes across league tabs. It explicitly distinguishes selected teams from saved picks and keeps failed saves visible. Switching weeks or seasons, or signing out with changes, offers **Save picks & continue**, **Keep picking**, or **Discard changes**. Continuing after a save requires server success; failures retain the draft. Browser refresh/close uses the browser’s unsaved-changes warning where supported (mobile app termination cannot be intercepted reliably). Picks still require an explicit save before kickoff; drafts do not count toward standings.
+
+
+### Commissioner pick submissions
+
+Select the season/week in **Commissioner tools → Pick submissions** to see active members’ saved-pick counts, latest successful save time, and the first kickoff. Filter **No saved picks** to identify members who may need a reminder. This panel refreshes with the existing five-second live polling without disturbing slate edits. Any number of picks is allowed, so counts below the full slate are not labeled incomplete. A successful save of an empty pick sheet is distinguished from no recorded save; save times for older picks are unavailable. Counts exclude unpublished/void games and other weeks/seasons. Unsaved browser drafts cannot be observed. Status is commissioner-only, reveals no team choices, and does not itself send messages.

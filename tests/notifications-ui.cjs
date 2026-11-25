@@ -25,6 +25,12 @@ let state={user:{id:'me',name:'Me',role:'member',slateEmails:true},games:[game],
  assert.equal(calls[0].url,'/api/profile/notifications');assert.deepEqual(JSON.parse(calls[0].options.body),{slateEmails:false,slateTexts:true,phone:'+15551234567'});assert.equal(run('user.slateEmails'),false);assert.equal(run('user.slateTexts'),true);assert.equal(run('user.phone'),'+15551234567');
  handler=async()=>response(200,{recipients:[]});await run('previewSlateTexts()');assert(el('#modalBody').innerHTML.includes('No members have opted in'));assert(el('#modalBody').innerHTML.includes('No texts are sent automatically'));
 
+
+ run("pickSubmissions={season:2027,week:3,gameCount:3,firstKickoff:1800000000,firstGameStarted:false,members:[{id:'me',name:'Me',savedCount:2,lastSavedAt:1800000000},{id:'other',name:'<Other>',savedCount:0,lastSavedAt:null}]};submissionFilter='all'");
+ assert(run('weeklyPickStatusContent()').includes('1 of 2 active members'));assert(run('weeklyPickStatusContent()').includes('2 picks saved'));assert(run('weeklyPickStatusContent()').includes('&lt;Other&gt;'));assert(run('weeklyPickStatusContent()').includes('No saved picks'));
+ run("submissionFilter='none';refreshLiveRegions()");assert(!el('#weeklyPickStatus').innerHTML.includes('2 picks saved'));assert(el('#weeklyPickStatus').innerHTML.includes('&lt;Other&gt;'));
+ run('pickSubmissions.members[1].savedCount=1;refreshLiveRegions()');assert(el('#weeklyPickStatus').innerHTML.includes('Everyone has saved at least one pick'));
+ run('pickSubmissions.gameCount=0');assert(run('weeklyPickStatusContent()').includes('No games are published'));run("submissionFilter='all';pickSubmissions=null");
  // Saving stays available on other tabs; navigation cannot silently discard changes.
  run("location.hash='#scores';picks={g:'away'};saved={};render()");assert(el('#app').innerHTML.includes('id="savePicks"'));assert(el('#app').innerHTML.includes('your picks are NOT saved'));
  let prevented=false;const leave={preventDefault(){prevented=true}};listeners.beforeunload(leave);assert(prevented);assert.equal(leave.returnValue,'');
