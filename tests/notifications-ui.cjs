@@ -15,7 +15,7 @@ let state={user:{id:'me',name:'Me',role:'member',slateEmails:true},games:[game],
  calls.length=0;let finish;handler=url=>url==='/api/picks'?new Promise(resolve=>finish=resolve):Promise.resolve(response(200,state));
  const pending=el('#savePicks').click();await el('#savePicks').click();assert.equal(calls.length,1);assert.equal(run('savingPicks'),true);
  run("picks.g='home';render()");finish(response(200,{ok:true}));await pending;assert.equal(run('saved.g'),'away');assert.equal(run('picks.g'),'home');assert.match(run('picksSaveMessage()'),/Unsaved/);
- handler=async()=>response(200,{ok:true});await el('#savePicks').click();assert.match(run('picksSaveMessage()'),/All picks saved/);
+ handler=async()=>response(200,{ok:true});await el('#savePicks').click();assert.match(run('picksSaveMessage()'),/All picks saved/);assert.equal(run('pickSaveBar()'),'');assert(!el('#app').innerHTML.includes('pick-save-space'));
  run("user.role='admin';location.hash='#admin';notificationAdmin={emailReady:true,recipientCount:2,currentRevision:'R',upcomingCount:1,campaign:null};slateDraft=null;render();previewSlateEmail()");
  assert(el('#modalBody').innerHTML.includes('Selecting a team alone does not save it'));assert(el('#modalBody').innerHTML.includes('Skipped games earn 0'));
  calls.length=0;state={...state,user:{...state.user,role:'admin'},notificationAdmin:{emailReady:true,recipientCount:2,currentRevision:'R',upcomingCount:1,campaign:{pending:2,sending:0,sent:0,failed:0,skipped:0,retryable:0}}};

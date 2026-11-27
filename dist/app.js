@@ -337,7 +337,7 @@ function picksSaveMessage(){
   return Object.keys(saved).length||lastPicksSaved===`${user?.id}:${season}:${week}`?'✓ All picks saved':'Choose any games, then tap Save picks';
 }
 function pickSaveBar(){
-  if(!user||view!=='picks'&&!hasUnsavedPicks()&&!savingPicks)return '';
+  if(!user||!hasUnsavedPicks()&&!savingPicks&&!pickSaveError)return '';
   const dirty=hasUnsavedPicks(),changes=[...new Set([...Object.keys(picks),...Object.keys(saved)])].filter(id=>picks[id]!==saved[id]).length;
   return `<div class="pick-save-space" aria-hidden="true"></div><section class="savebar ${dirty?'has-unsaved':'is-saved'}" aria-label="Save weekly picks"><div><strong role="status">${picksSaveMessage()}</strong><span>${dirty?`${changes} unsaved change${changes===1?'':'s'} · Only saved picks count.`:`Week ${week} · ${activeGames().filter(g=>saved[g.id]).length} saved picks`}</span>${pickSaveError?`<span class="pick-save-error" role="alert">Not saved: ${esc(pickSaveError)} Try Save picks again.</span>`:''}</div><button class="button primary" id="savePicks" ${savingPicks||!dirty?'disabled':''}>${savingPicks?'Saving…':'Save picks'}</button></section>`;
 }
@@ -348,7 +348,7 @@ async function saveCurrentPicks(){
     else{if(!user){accountModal();return false;}await api('picks',{season:pickSeason,week:pickWeek,picks:submitted})}
     lastPicksSaved=`${owner}:${pickSeason}:${pickWeek}`;
     if(season===pickSeason&&week===pickWeek&&user?.id===owner)saved={...submitted};
-    toast(`Your Week ${pickWeek} picks are saved. Bring on Saturday.`);return true;
+    toast(`All picks saved. Your Week ${pickWeek} picks are ready.`);return true;
   }catch(error){pickSaveError=error.message;toast(error.message);return false}finally{savingPicks=false;render()}
 }
 function guardPickChanges(proceed){
