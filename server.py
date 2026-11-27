@@ -91,12 +91,14 @@ def ranked(rows,key):
         if row[key]!=previous:rank=index
         row['rank']=rank;previous=row[key]
     return ordered
-def standings(c,season,include_live=False):
-    # One snapshot of every saved game/pick in this season, across all weeks.
-    gs={(row['id'],row['week']):json.loads(row['data']) for row in c.execute('SELECT id,week,data FROM games WHERE season=?',(season,))}
+def standings(c,season,include_live=False,week=None):
+    # Optional week limits both saved games and picks to the same period.
+    clause=' AND week=?' if week is not None else ''
+    args=(season,week) if week is not None else (season,)
+    gs={(row['id'],row['week']):json.loads(row['data']) for row in c.execute('SELECT id,week,data FROM games WHERE season=?'+clause,args)}
     rows={u['id']:{**dict(u),'wins':0,'losses':0,'pushes':0,'points':0} for u in c.execute('SELECT id,name FROM users')}
     live={uid:{'livePoints':0,'liveWins':0,'liveLosses':0,'livePushes':0,'livePicks':0} for uid in rows}
-    for pick in c.execute('SELECT user_id,game_id,week,side FROM picks WHERE season=?',(season,)):
+    for pick in c.execute('SELECT user_id,game_id,week,side FROM picks WHERE season=?'+clause,args):
         row=rows.get(pick['user_id']);game=gs.get((pick['game_id'],pick['week']),{})
         if row is None:continue
         score=points(game,pick['side'])
@@ -107,6 +109,9 @@ def standings(c,season,include_live=False):
             if projected is not None:
                 item=live[pick['user_id']];item['livePoints']+=projected;item['livePicks']+=1
                 item['liveWins' if projected==1 else 'livePushes' if projected==.5 else 'liveLosses']+=1
+    for row in rows.values():
+        decided=row['wins']+row['losses']
+        row['winPercentage']=round(100*row['wins']/decided,1) if decided else None
     official=ranked(list(rows.values()),'points')
     if not include_live:return official
     projections=[{**row,**live[row['id']],'officialRank':row['rank'],'projectedPoints':row['points']+live[row['id']]['livePoints']} for row in official]
@@ -374,7 +379,8 @@ def application(environ,start_response):
                     else:state_games=[g for g in state_games if g.get('included')]
                     last=c.execute('SELECT value FROM meta WHERE key=?',(f'last-{season}-{week}',)).fetchone()
                     official,live_board=standings(c,season,include_live=True)
-                    result={'pickSubmissions':weekly_pick_status(c,state_games,season,week) if user['role']=='admin' else None,'slatePublication':notifications.publication(c,season,week),'notificationAdmin':notifications.admin_state(c,state_games,season,week,kickoff) if user['role']=='admin' else None,'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{**{k:user[k] for k in ('id','name','role')},'slateEmails':notifications.opted_in(c,user['id']),**notifications.text_preference(c,user['id'])},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
+                    weekly,weekly_live=standings(c,season,include_live=True,week=week)
+                    result={'weeklyStandings':weekly,'weeklyLiveStandings':weekly_live,'pickSubmissions':weekly_pick_status(c,state_games,season,week) if user['role']=='admin' else None,'slatePublication':notifications.publication(c,season,week),'notificationAdmin':notifications.admin_state(c,state_games,season,week,kickoff) if user['role']=='admin' else None,'lockedPicks':revealed_game_picks(c,state_games,season,week),'liveStandings':live_board,'seasons':[r[0] for r in c.execute('SELECT DISTINCT season FROM games ORDER BY season DESC')],'user':{**{k:user[k] for k in ('id','name','role')},'slateEmails':notifications.opted_in(c,user['id']),**notifications.text_preference(c,user['id'])},'games':state_games,'picks':{p['game_id']:p['side'] for p in c.execute('SELECT * FROM picks WHERE user_id=? AND season=? AND week=?',(user['id'],season,week))},'standings':official,'members':[dict(m) for m in c.execute('SELECT id,name,role,active FROM users')] if user['role']=='admin' else [],'lastSync':last['value'] if last else None}
                 elif route=='profile/notifications' and method=='POST':
                     enabled=data.get('slateEmails')
                     if not isinstance(enabled,bool):raise Problem('Choose whether to receive slate emails.')
