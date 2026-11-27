@@ -13,6 +13,8 @@ const {chromium}=require('playwright');
  let browser;
  try{
   browser=await chromium.launch({headless:true});const page=await browser.newPage({isMobile:true,hasTouch:true,deviceScaleFactor:2,userAgent:'Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36'});
+  // Geometry fixtures are static: background polling would replace them with the mocked 401.
+  await page.addInitScript(()=>{window.setInterval=()=>0});
   await page.route('**/api/**',route=>route.fulfill({status:401,contentType:'application/json',body:'{"error":"Sign in required"}'}));
   await page.goto(`http://127.0.0.1:${server.address().port}/#standings`);
   await page.waitForFunction(()=>!demo&&!user);
