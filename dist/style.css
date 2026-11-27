@@ -234,3 +234,5 @@ main{width:100%}
 }
 
 @media(min-width:581px) and (max-width:880px){aside nav a{padding-left:0;padding-right:0;margin-left:0;margin-right:0;max-width:100%}}
+
+@media(max-width:580px){.game-body{align-items:stretch}.team{grid-template-rows:minmax(0,1fr) auto}}
