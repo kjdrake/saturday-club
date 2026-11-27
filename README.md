@@ -170,3 +170,8 @@ Select the season/week in **Commissioner tools → Pick submissions** to see act
 ## Default season and week
 
 Opening the site without a season/week link selects ESPN's current college-football regular-season context instead of a fixed sample week. The server caches this public context for 15 minutes. If the provider is unavailable, the calendar fallback rolls weeks over on Tuesday in America/Chicago, with Week 1 starting 13 days before Labor Day. Preseason defaults to Week 1; postseason remains at the last supported regular-season week (18). January belongs to the previous season. Explicit season/week links, manual navigation, and the selected week through social sign-in are preserved. The static sample preview retains its labeled example week. This selection does not publish games or change saved picks.
+
+
+## Weekly and overall standings
+
+Standings shows the selected week's table followed by the overall season table. The week selector also lets you review earlier weeks. Both tables show final W–L–P and Win %, including in Live projections mode. Win % is wins divided by wins plus losses, rounded to one decimal; pushes, skipped games, void games and unfinished games do not count in that denominator. A dash means no decided picks. Rankings remain based on points (pushes earn half a point), with shared ranks for ties. Live projections are separate from final records and percentages. CSV exports include both scopes, season/week, records and percentages. Saved picks and scoring rules are unchanged.
