@@ -268,11 +268,32 @@ function previewSlateEmail(retry=false){
     finally{sendingSlateEmails=false}
   };
 }
+function calendarPeriod(now=new Date()){
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'numeric',day:'numeric'}).formatToParts(now).map(part=>[part.type,part.value]));
+  const year=+parts.year,month=+parts.month,day=+parts.day,season=month===1?year-1:year;
+  const september=new Date(Date.UTC(season,8,1)),laborDay=1+(8-september.getUTCDay())%7;
+  const start=Date.UTC(season,8,laborDay-13),today=Date.UTC(year,month-1,day);
+  return {season,week:Math.max(1,Math.min(18,Math.floor((today-start)/604800000)+1))};
+}
+async function initializePeriod(){
+  if(!readWeekLink()&&serverBacked){
+    let current=calendarPeriod();
+    try{
+      const received=await api('current-period',undefined,{timeoutMs:18000});
+      if(Number.isInteger(received.season)&&received.season>=2000&&received.season<=2100&&Number.isInteger(received.week)&&received.week>=1&&received.week<=18)current=received;
+    }catch(error){}
+    season=current.season;week=current.week;
+    $('#season').innerHTML=`<option selected>${season} season</option>`;
+    try{sessionStorage.setItem('sc-return-week',JSON.stringify({season,week}))}catch(error){}
+  }
+  readInvitation();render();await load();handleAuthReturn();
+}
 function readWeekLink(){
   if(!location.href)return;
   const url=new URL(location.href);let year=url.searchParams.get('season'),number=url.searchParams.get('week');
   if(!year&&!number&&(url.searchParams.has('auth_success')||url.searchParams.has('auth_error'))){try{const old=JSON.parse(sessionStorage.getItem('sc-return-week')||'null');year=old?.season;number=old?.week}catch(error){}}
-  if(/^\d{4}$/.test(String(year))&&/^\d{1,2}$/.test(String(number))&&+year>=2000&&+year<=2100&&+number>=1&&+number<=18){season=+year;week=+number;try{sessionStorage.setItem('sc-return-week',JSON.stringify({season,week}))}catch(error){}}
+  if(/^\d{4}$/.test(String(year))&&/^\d{1,2}$/.test(String(number))&&+year>=2000&&+year<=2100&&+number>=1&&+number<=18){season=+year;week=+number;try{sessionStorage.setItem('sc-return-week',JSON.stringify({season,week}))}catch(error){};return true}
+  return false;
 }
 function rememberWeekLink(){
   if(!location.href)return;
@@ -661,4 +682,4 @@ function accountModal(){
     }
   });
 }
-$('#account').onclick=accountModal;$('#mobileAccount')?.addEventListener('click',accountModal);$('#rules').onclick=()=>modal('<h2>A simple game. A long season.</h2><p>Choose either team against the commissioner’s fixed point spread. Cover: 1 point. Push: 0.5 points. Miss or no pick: 0 points.</p><p>Each game locks at kickoff. Feed lines freeze when published. Commissioners may correct a spread before kickoff; corrections are shown on the game card. Canceled games are void. Final scores determine standings; tied point totals share a rank.</p>');$('#season').onchange=()=>{const nextSeason=parseInt($('#season').value);$('#season').value=season+' season';if(nextSeason!==season)guardPickChanges(()=>{season=nextSeason;$('#season').value=season+' season';if(demo){picks={};saved={};games=[];render()}else load()})};window.onhashchange=()=>{readPasswordReset();render();if(passwordResetToken)resetPasswordModal()};if(serverBacked){$('#connection').textContent='● CONNECTING';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}try{pendingInviteCode=sessionStorage.getItem('sc-pending-invite')||''}catch(error){}readPasswordReset();readWeekLink();readInvitation();render();load().then(handleAuthReturn);setInterval(refreshLive,5000);document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState!=='hidden')refreshLive()});window.addEventListener?.('online',refreshLive);
+$('#account').onclick=accountModal;$('#mobileAccount')?.addEventListener('click',accountModal);$('#rules').onclick=()=>modal('<h2>A simple game. A long season.</h2><p>Choose either team against the commissioner’s fixed point spread. Cover: 1 point. Push: 0.5 points. Miss or no pick: 0 points.</p><p>Each game locks at kickoff. Feed lines freeze when published. Commissioners may correct a spread before kickoff; corrections are shown on the game card. Canceled games are void. Final scores determine standings; tied point totals share a rank.</p>');$('#season').onchange=()=>{const nextSeason=parseInt($('#season').value);$('#season').value=season+' season';if(nextSeason!==season)guardPickChanges(()=>{season=nextSeason;$('#season').value=season+' season';if(demo){picks={};saved={};games=[];render()}else load()})};window.onhashchange=()=>{readPasswordReset();render();if(passwordResetToken)resetPasswordModal()};if(serverBacked){$('#connection').textContent='● CONNECTING';$('#profileName').innerHTML='Sign in<small>Join your friends</small>'}try{pendingInviteCode=sessionStorage.getItem('sc-pending-invite')||''}catch(error){}readPasswordReset();initializePeriod();setInterval(refreshLive,5000);document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState!=='hidden')refreshLive()});window.addEventListener?.('online',refreshLive);

@@ -239,6 +239,39 @@ def session_cookie(c, uid, headers):
     c.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),uid,time.time()+604800))
     headers.append(('Set-Cookie',f'sc_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800'+('; Secure' if SECURE else '')))
 
+def calendar_period(today=None):
+    """Regular-season weeks roll over Tuesday, in US Central time."""
+    if today is None:
+        from zoneinfo import ZoneInfo
+        today=datetime.datetime.now(ZoneInfo('America/Chicago')).date()
+    season=today.year-1 if today.month==1 else today.year
+    labor_day=datetime.date(season,9,1)
+    labor_day+=datetime.timedelta(days=(-labor_day.weekday())%7)
+    start=labor_day-datetime.timedelta(days=13)
+    week=max(1,min(18,(today-start).days//7+1))
+    return {'season':season,'week':week}
+
+_current_period_cache=None
+_current_period_lock=threading.Lock()
+def current_period():
+    global _current_period_cache
+    now=time.time()
+    with _current_period_lock:
+        if _current_period_cache and now-_current_period_cache['at']<900:
+            return _current_period_cache['period']
+        result=calendar_period()
+        try:
+            feed=fetch_json('https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=1')
+            year=int(feed['season']['year'])
+            kind=int(feed['season']['type'])
+            number=int(feed['week']['number']) if kind==2 else (1 if kind==1 else 18)
+            if not (2000<=year<=2100 and kind in (1,2,3) and 1<=number<=18):raise ValueError()
+            result={'season':year,'week':number}
+        except Exception:
+            pass # A provider failure must not prevent opening the league.
+        _current_period_cache={'at':now,'period':result}
+        return result
+
 def application(environ,start_response):
     headers=[('X-Content-Type-Options','nosniff'),('Referrer-Policy','no-referrer'),('X-Frame-Options','DENY'),
              ('Permissions-Policy','camera=(), microphone=(), geolocation=()'),
@@ -270,7 +303,9 @@ def application(environ,start_response):
             cookie=SimpleCookie();cookie.load(environ.get('HTTP_COOKIE',''));token=cookie['sc_session'].value if 'sc_session' in cookie else ''
             u=c.execute('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token=? AND s.expires>? AND u.active=1',(hashlib.sha256(token.encode()).hexdigest(),time.time())).fetchone()
             user=dict(u) if u else None
-            if route=='password/forgot' and method=='POST':
+            if route=='current-period' and method=='GET':
+                result=current_period()
+            elif route=='password/forgot' and method=='POST':
                 email=str(data.get('email','')).strip().lower()
                 if not invitations.valid_email(email):raise Problem('Enter a valid email address.')
                 if not invitations.ready():raise Problem('Password reset email is not available yet. Contact your commissioner for help.',503)

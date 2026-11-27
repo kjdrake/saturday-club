@@ -165,3 +165,8 @@ The **Save picks** bar stays fixed above mobile navigation from the first select
 ### Commissioner pick submissions
 
 Select the season/week in **Commissioner tools → Pick submissions** to see active members’ saved-pick counts, latest successful save time, and the first kickoff. Filter **No saved picks** to identify members who may need a reminder. This panel refreshes with the existing five-second live polling without disturbing slate edits. Any number of picks is allowed, so counts below the full slate are not labeled incomplete. A successful save of an empty pick sheet is distinguished from no recorded save; save times for older picks are unavailable. Counts exclude unpublished/void games and other weeks/seasons. Unsaved browser drafts cannot be observed. Status is commissioner-only, reveals no team choices, and does not itself send messages.
+
+
+## Default season and week
+
+Opening the site without a season/week link selects ESPN's current college-football regular-season context instead of a fixed sample week. The server caches this public context for 15 minutes. If the provider is unavailable, the calendar fallback rolls weeks over on Tuesday in America/Chicago, with Week 1 starting 13 days before Labor Day. Preseason defaults to Week 1; postseason remains at the last supported regular-season week (18). January belongs to the previous season. Explicit season/week links, manual navigation, and the selected week through social sign-in are preserved. The static sample preview retains its labeled example week. This selection does not publish games or change saved picks.
