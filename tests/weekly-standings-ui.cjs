@@ -17,6 +17,7 @@ const response=d=>({ok:true,status:200,json:async()=>JSON.parse(JSON.stringify(d
  let html=el('#app').innerHTML;
  assert.match(html,/Week 12 standings/);assert.match(html,/2026 overall season standings/);
  assert.match(html,/50.0%/);assert.match(html,/66.7%/);assert.match(html,/1–1–1/);
+ assert.match(html,/standings-mobile-list/);assert.match(html,/standings-mobile-points/);assert.match(html,/<caption class="sr-only">/);
  assert.match(html,/id="weekPicker"/);assert.equal(run('weeklyRankRows()[0].points'),2.5);
  assert.equal(run('winPercentage({wins:0,losses:0,pushes:2})'),'—');
  assert.equal(run('winPercentage({wins:1,losses:0,pushes:9})'),'100.0%');
